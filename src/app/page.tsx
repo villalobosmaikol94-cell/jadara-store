@@ -789,12 +789,20 @@ export default function JadaraStore() {
         </div>
       )}
 
-      <ProbadorAR
+            <ProbadorAR
         abierto={Boolean(productoProbadorAR)}
         alCerrar={() => setProductoProbadorAR(null)}
         nombreProducto={productoProbadorAR?.nombre ?? ""}
         categoria={productoProbadorAR?.categoria ?? ""}
+        imagenProducto={
+          productoProbadorAR
+            ? productoProbadorAR.coloresFotos.at(
+                colorTarjetaActivo[productoProbadorAR.id] ?? 0
+              )?.imagenUrl || productoProbadorAR.imagenUrl
+            : null
+        }
       />
+
 
       <CheckoutWhatsApp
         abierto={checkoutAbierto}
