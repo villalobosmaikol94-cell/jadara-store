@@ -56,8 +56,7 @@ interface PanelProps {
   alActualizarCatalogo: () => void;
 }
 
-const PIN_ACCESO = "2026";
-
+const PIN_ACCESO = "2702";
 const TALLAS_DISPONIBLES = [
   "Única",
   "XS",
@@ -74,15 +73,23 @@ const TALLAS_DISPONIBLES = [
 ];
 
 const PALETA_RAPIDA = [
-  { nombre: "Rosa Pétalo", hex: "#E8B4B8" },
-  { nombre: "Crema", hex: "#F5EFE6" },
-  { nombre: "Terracota", hex: "#C6736A" },
-  { nombre: "Dorado", hex: "#C89B54" },
+  { nombre: "Negro", hex: "#1A1A1A" },
   { nombre: "Blanco", hex: "#FFFFFF" },
+  { nombre: "Rosa Pétalo", hex: "#E8B4B8" },
+  { nombre: "Terracota", hex: "#C6736A" },
+  { nombre: "Crema", hex: "#F5EFE6" },
   { nombre: "Beige", hex: "#D8C3A5" },
-  { nombre: "Lila Suave", hex: "#D4BBE6" },
-  { nombre: "Azul Cielo", hex: "#B8D4E3" },
-  { nombre: "Verde Salvia", hex: "#B5C9B8" },
+  { nombre: "Café", hex: "#6F4E37" },
+  { nombre: "Dorado", hex: "#C89B54" },
+  { nombre: "Rojo", hex: "#C81D25" },
+  { nombre: "Vinotinto", hex: "#6B1D2F" },
+  { nombre: "Fucsia", hex: "#E0218A" },
+  { nombre: "Lila", hex: "#C8A2C8" },
+  { nombre: "Azul Rey", hex: "#1E40AF" },
+  { nombre: "Azul Cielo", hex: "#93C5FD" },
+  { nombre: "Verde Esmeralda", hex: "#047857" },
+  { nombre: "Verde Salvia", hex: "#9CAF88" },
+  { nombre: "Gris", hex: "#9CA3AF" },
 ];
 export default function PanelAdminModal({
   abierto,
@@ -108,8 +115,8 @@ export default function PanelAdminModal({
   const [archivoPrincipal, setArchivoPrincipal] = useState<File | null>(null);
 
   const [coloresForm, setColoresForm] = useState<VarianteColorForm[]>([]);
-  const [nuevoColorNombre, setNuevoColorNombre] = useState("Rosa Pétalo");
-  const [nuevoColorHex, setNuevoColorHex] = useState("#E8B4B8");
+  const [nuevoColorNombre, setNuevoColorNombre] = useState("");
+  const [nuevoColorHex, setNuevoColorHex] = useState("#C6736A");
 
   const cargarDatos = async () => {
     const { data: prods } = await supabase
@@ -154,6 +161,7 @@ export default function PanelAdminModal({
       ...prev,
       { nombre: nuevoColorNombre.trim(), hex: nuevoColorHex, archivo: null },
     ]);
+    setNuevoColorNombre("");
   };
 
   const asignarFotoAColor = (index: number, file: File | null) => {
@@ -466,7 +474,7 @@ export default function PanelAdminModal({
             <div className="bg-white p-3.5 rounded-2xl gold-ring-border space-y-3">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-[#5E3A36]">
                 <Palette className="w-4 h-4 text-[#C89B54]" />
-                <span>2. Colores disponibles (cada color puede llevar su foto):</span>
+                <span>2. Colores disponibles (elige rápido o crea cualquier tono):</span>
               </div>
 
               <div className="flex flex-wrap gap-1.5">
@@ -478,7 +486,7 @@ export default function PanelAdminModal({
                       setNuevoColorNombre(p.nombre);
                       setNuevoColorHex(p.hex);
                     }}
-                    className="px-2.5 py-1 rounded-full bg-[#FDF8F6] gold-ring-border text-[11px] flex items-center gap-1.5 cursor-pointer"
+                    className="px-2.5 py-1 rounded-full bg-[#FDF8F6] gold-ring-border text-[11px] flex items-center gap-1.5 cursor-pointer hover:bg-[#F7E6E1]"
                   >
                     <span
                       className="w-3 h-3 rounded-full border border-black/15"
@@ -489,27 +497,33 @@ export default function PanelAdminModal({
                 ))}
               </div>
 
-              <div className="flex gap-2">
-                <input
-                  type="color"
-                  value={nuevoColorHex}
-                  onChange={(e) => setNuevoColorHex(e.target.value)}
-                  className="w-10 h-9 rounded-lg border-0 cursor-pointer"
-                />
-                <input
-                  type="text"
-                  value={nuevoColorNombre}
-                  onChange={(e) => setNuevoColorNombre(e.target.value)}
-                  placeholder="Nombre del color"
-                  className="flex-1 px-3 py-1.5 rounded-xl bg-[#FDF8F6] gold-ring-border text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={agregarColorLista}
-                  className="px-3.5 py-1.5 rounded-xl bg-[#F7E6E1] text-[#C6736A] text-xs font-semibold cursor-pointer"
-                >
-                  + Color
-                </button>
+              <div className="bg-[#FDF8F6] p-2.5 rounded-xl gold-ring-border space-y-2">
+                <span className="block text-[11px] text-[#9E7B74]">
+                  Toca el cuadro de color para elegir <strong>cualquier tono</strong> y escribe su nombre:
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    title="Toca para elegir cualquier color"
+                    value={nuevoColorHex}
+                    onChange={(e) => setNuevoColorHex(e.target.value)}
+                    className="w-11 h-10 rounded-xl border border-[#C89B54]/40 cursor-pointer shrink-0 bg-white p-0.5"
+                  />
+                  <input
+                    type="text"
+                    value={nuevoColorNombre}
+                    onChange={(e) => setNuevoColorNombre(e.target.value)}
+                    placeholder="Escribe cualquier color (ej: Vinotinto)"
+                    className="flex-1 px-3 py-2 rounded-xl bg-white gold-ring-border text-xs text-[#5E3A36]"
+                  />
+                  <button
+                    type="button"
+                    onClick={agregarColorLista}
+                    className="px-4 py-2 rounded-xl bg-[#C6736A] text-white text-xs font-semibold cursor-pointer shrink-0"
+                  >
+                    + Añadir
+                  </button>
+                </div>
               </div>
 
               {coloresForm.length > 0 && (
