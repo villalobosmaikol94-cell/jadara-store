@@ -51,10 +51,9 @@ export default function CheckoutWhatsApp({
 
   if (!abierto && !factura) return null;
 
-  const abrirWhatsAppInteligente = (encodedMessage: string) => {
-    const phoneNumber = "573246670248";
-    const urlWeb = `https://wa.me{phoneNumber}?text=${encodedMessage}`;
-    const urlApp = `whatsapp://send?phone=${phoneNumber}&text=${encodedMessage}`;
+    const abrirWhatsAppInteligente = (encodedMessage: string) => {
+    const urlWeb = `https://wa.me{encodedMessage}`;
+    const urlApp = `whatsapp://send?phone=573246670248&text=${encodedMessage}`;
     const esMovil = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
     if (esMovil) {
@@ -68,6 +67,7 @@ export default function CheckoutWhatsApp({
       window.open(urlWeb, "_blank", "noopener,noreferrer");
     }
   };
+
 
   const confirmarYGenerarFactura = async (e: React.FormEvent) => {
     e.preventDefault();
