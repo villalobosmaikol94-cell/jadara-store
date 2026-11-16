@@ -6,11 +6,15 @@ import {
   Camera,
   Sparkles,
   Download,
-  ZoomIn,
-  ZoomOut,
-  Upload,
-  Move,
+  SwitchCamera,
+  Sliders,
+  Loader2,
 } from "lucide-react";
+import {
+  FaceLandmarker,
+  PoseLandmarker,
+  FilesetResolver,
+} from "@mediapipe/tasks-vision";
 
 interface ProbadorProps {
   abierto: boolean;
@@ -25,20 +29,29 @@ interface TonoCosmetico {
   color: string;
   opacidad: number;
 }
-
 const TONOS_LABIAL: TonoCosmetico[] = [
   { nombre: "Natural", color: "transparent", opacidad: 0 },
-  { nombre: "Rosa Pétalo", color: "#D46A7E", opacidad: 0.45 },
-  { nombre: "Terracota Jadara", color: "#B85042", opacidad: 0.5 },
-  { nombre: "Vino Pasión", color: "#7A1C33", opacidad: 0.55 },
-  { nombre: "Nude Caramelo", color: "#B57863", opacidad: 0.45 },
+  { nombre: "Rosa Pétalo", color: "#C94A6A", opacidad: 0.55 },
+  { nombre: "Terracota Jadara", color: "#A83C2E", opacidad: 0.6 },
+  { nombre: "Vino Pasión", color: "#6E142C", opacidad: 0.65 },
+  { nombre: "Nude Caramelo", color: "#A6634E", opacidad: 0.55 },
 ];
 
 const TONOS_RUBOR: TonoCosmetico[] = [
   { nombre: "Sin Rubor", color: "transparent", opacidad: 0 },
-  { nombre: "Durazno Sol", color: "#E88D72", opacidad: 0.28 },
-  { nombre: "Rosa Fresco", color: "#E07A96", opacidad: 0.28 },
-  { nombre: "Bronce Dorado", color: "#C88A55", opacidad: 0.26 },
+  { nombre: "Durazno Sol", color: "#E07A5F", opacidad: 0.35 },
+  { nombre: "Rosa Fresco", color: "#D96B8A", opacidad: 0.35 },
+  { nombre: "Bronce Dorado", color: "#B87A44", opacidad: 0.32 },
+];
+
+const LABIO_EXTERIOR: number[] = [
+  61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37,
+  39, 40, 185,
+];
+
+const LABIO_INTERIOR: number[] = [
+  78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82,
+  81, 80, 191,
 ];
 export default function ProbadorAR({
   abierto,
@@ -48,133 +61,263 @@ export default function ProbadorAR({
   imagenProducto,
 }: ProbadorProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasCapturaRef = useRef<HTMLCanvasElement | null>(null);
-  const inputFotoPropiaRef = useRef<HTMLInputElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imagenPrendaRef = useRef<HTMLImageElement | null>(null);
 
+  const [camaraFrontal, setCamaraFrontal] = useState<boolean>(true);
+  const [cargandoIA, setCargandoIA] = useState<boolean>(true);
   const [errorCamara, setErrorCamara] = useState<string | null>(null);
-  const [fotoPropia, setFotoPropia] = useState<string | null>(null);
   const [fotoCapturada, setFotoCapturada] = useState<string | null>(null);
 
-  // Controles de Belleza (Labial y Rubor)
-  const [labialActivo, setLabialActivo] = useState<TonoCosmetico>(TONOS_LABIAL[1]);
-  const [ruborActivo, setRuborActivo] = useState<TonoCosmetico>(TONOS_RUBOR[1]);
-
-  // Controles de Prenda / Cartera / Tenis (Escala y Posición)
-  const [escalaPrenda, setEscalaPrenda] = useState<number>(1);
-  const [posPrenda, setPosPrenda] = useState<{ x: number; y: number }>({ x: 0, y: 35 });
-  const [arrastrando, setArrastrando] = useState<boolean>(false);
-  const inicioArrastre = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [labialActivo, setLabialActivo] = useState<TonoCosmetico>(
+    TONOS_LABIAL.at(1) ?? { nombre: "Rosa Pétalo", color: "#C94A6A", opacidad: 0.55 }
+  );
+  const [ruborActivo, setRuborActivo] = useState<TonoCosmetico>(
+    TONOS_RUBOR.at(1) ?? { nombre: "Durazno Sol", color: "#E07A5F", opacidad: 0.35 }
+  );
+  const [ajusteAltura, setAjusteAltura] = useState<number>(0);
+  const [ajusteAncho, setAjusteAncho] = useState<number>(1.35);
 
   const esBelleza = categoria.toLowerCase().includes("belleza");
+  const esCartera = categoria.toLowerCase().includes("cartera");
+  const esTenis = categoria.toLowerCase().includes("tenis");
 
   useEffect(() => {
-    let streamActivo: MediaStream | null = null;
+    if (!imagenProducto) {
+      imagenPrendaRef.current = null;
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = imagenProducto;
+    img.onload = () => {
+      imagenPrendaRef.current = img;
+    };
+  }, [imagenProducto]);
+  useEffect(() => {
+    if (!abierto || fotoCapturada) return;
 
-    const iniciarCamara = async () => {
-      if (!abierto || fotoPropia) return;
+    let streamActivo: MediaStream | null = null;
+    let animationFrameId: number;
+    let faceLandmarker: FaceLandmarker | null = null;
+    let poseLandmarker: PoseLandmarker | null = null;
+    let cancelado = false;
+
+    const inicializarAR = async () => {
+      setCargandoIA(true);
       setErrorCamara(null);
+
       try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://jsdelivr.net"
+        );
+
+        if (esBelleza) {
+          faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                "https://googleapis.com",
+              delegate: "GPU",
+            },
+            runningMode: "VIDEO",
+            numFaces: 1,
+          });
+        } else {
+          poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                "https://googleapis.com",
+              delegate: "GPU",
+            },
+            runningMode: "VIDEO",
+            numPoses: 1,
+          });
+        }
+
         streamActivo = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
+          video: {
+            facingMode: camaraFrontal ? "user" : "environment",
+            width: { ideal: 720 },
+            height: { ideal: 960 },
+          },
           audio: false,
         });
+
+        if (cancelado) return;
+
         if (videoRef.current) {
           videoRef.current.srcObject = streamActivo;
+          await videoRef.current.play();
         }
+
+        setCargandoIA(false);
+        procesarFotograma();
       } catch {
-        setErrorCamara(
-          "No pudimos encender la cámara. Puedes subir una foto tuya para probarte el producto."
-        );
+        if (!cancelado) {
+          setCargandoIA(false);
+          setErrorCamara(
+            "No pudimos acceder a la cámara. Verifica los permisos en tu navegador."
+          );
+        }
       }
     };
+    const procesarFotograma = () => {
+      if (cancelado) return;
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
 
-    iniciarCamara();
+      if (video && canvas && video.readyState >= 2) {
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+
+          ctx.save();
+          if (camaraFrontal) {
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+          }
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          const ahora = performance.now();
+
+          if (esBelleza && faceLandmarker) {
+            const resultados = faceLandmarker.detectForVideo(video, ahora);
+            const rostro = resultados.faceLandmarks.at(0);
+
+            if (rostro) {
+              if (ruborActivo.opacidad > 0) {
+                const mejillaIzq = rostro.at(205);
+                const mejillaDer = rostro.at(425);
+                if (mejillaIzq && mejillaDer) {
+                  ctx.save();
+                  ctx.globalCompositeOperation = "multiply";
+                  ctx.globalAlpha = ruborActivo.opacidad;
+                  ctx.filter = "blur(18px)";
+                  ctx.fillStyle = ruborActivo.color;
+
+                  const radioMejilla = canvas.width * 0.065;
+                  ctx.beginPath();
+                  ctx.arc(mejillaIzq.x * canvas.width, mejillaIzq.y * canvas.height, radioMejilla, 0, Math.PI * 2);
+                  ctx.arc(mejillaDer.x * canvas.width, mejillaDer.y * canvas.height, radioMejilla, 0, Math.PI * 2);
+                  ctx.fill();
+                  ctx.restore();
+                }
+              }
+
+              if (labialActivo.opacidad > 0) {
+                ctx.save();
+                ctx.globalCompositeOperation = "multiply";
+                ctx.globalAlpha = labialActivo.opacidad;
+                ctx.filter = "blur(2px)";
+                ctx.fillStyle = labialActivo.color;
+
+                ctx.beginPath();
+                LABIO_EXTERIOR.forEach((idx: number, i: number) => {
+                  const pt = rostro.at(idx);
+                  if (!pt) return;
+                  if (i === 0) ctx.moveTo(pt.x * canvas.width, pt.y * canvas.height);
+                  else ctx.lineTo(pt.x * canvas.width, pt.y * canvas.height);
+                });
+                ctx.closePath();
+
+                LABIO_INTERIOR.forEach((idx: number, i: number) => {
+                  const pt = rostro.at(idx);
+                  if (!pt) return;
+                  if (i === 0) ctx.moveTo(pt.x * canvas.width, pt.y * canvas.height);
+                  else ctx.lineTo(pt.x * canvas.width, pt.y * canvas.height);
+                });
+                ctx.closePath();
+
+                ctx.fill("evenodd");
+                ctx.restore();
+              }
+            }
+          }
+          if (!esBelleza && poseLandmarker && imagenPrendaRef.current) {
+            const poses = poseLandmarker.detectForVideo(video, ahora);
+            const cuerpo = poses.landmarks.at(0);
+
+            if (cuerpo) {
+              const hombroIzq = cuerpo.at(11);
+              const hombroDer = cuerpo.at(12);
+              const caderaIzq = cuerpo.at(23);
+              const munecaDer = cuerpo.at(16);
+              const tobilloDer = cuerpo.at(28);
+
+              ctx.save();
+              ctx.globalCompositeOperation = "multiply";
+
+              if (esCartera && munecaDer) {
+                const anchoCartera = canvas.width * 0.28 * ajusteAncho;
+                const altoCartera = anchoCartera * (imagenPrendaRef.current.height / imagenPrendaRef.current.width);
+                ctx.drawImage(
+                  imagenPrendaRef.current,
+                  munecaDer.x * canvas.width - anchoCartera / 2,
+                  munecaDer.y * canvas.height + ajusteAltura,
+                  anchoCartera,
+                  altoCartera
+                );
+              } else if (esTenis && tobilloDer) {
+                const anchoTenis = canvas.width * 0.22 * ajusteAncho;
+                const altoTenis = anchoTenis * (imagenPrendaRef.current.height / imagenPrendaRef.current.width);
+                ctx.drawImage(
+                  imagenPrendaRef.current,
+                  tobilloDer.x * canvas.width - anchoTenis / 2,
+                  tobilloDer.y * canvas.height - altoTenis * 0.3 + ajusteAltura,
+                  anchoTenis,
+                  altoTenis
+                );
+              } else if (hombroIzq && hombroDer && caderaIzq) {
+                const centroX = ((hombroIzq.x + hombroDer.x) / 2) * canvas.width;
+                const topY = Math.min(hombroIzq.y, hombroDer.y) * canvas.height - 25 + ajusteAltura;
+                const anchoHombros = Math.abs(hombroIzq.x - hombroDer.x) * canvas.width;
+                const anchoPrenda = Math.max(anchoHombros * ajusteAncho, canvas.width * 0.35);
+                const altoPrenda = anchoPrenda * (imagenPrendaRef.current.height / imagenPrendaRef.current.width);
+
+                ctx.drawImage(
+                  imagenPrendaRef.current,
+                  centroX - anchoPrenda / 2,
+                  topY,
+                  anchoPrenda,
+                  altoPrenda
+                );
+              }
+              ctx.restore();
+            }
+          }
+
+          ctx.restore();
+        }
+      }
+
+      animationFrameId = requestAnimationFrame(procesarFotograma);
+    };
+
+    inicializarAR();
 
     return () => {
+      cancelado = true;
+      cancelAnimationFrame(animationFrameId);
       if (streamActivo) {
         streamActivo.getTracks().forEach((track) => track.stop());
       }
+      faceLandmarker?.close();
+      poseLandmarker?.close();
     };
-  }, [abierto, fotoPropia]);
+  }, [abierto, camaraFrontal, esBelleza, esCartera, esTenis, labialActivo, ruborActivo, ajusteAltura, ajusteAncho, fotoCapturada]);
 
   if (!abierto) return null;
 
-  const manejarSubidaFotoPropia = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.item(0);
-    if (file) {
-      setFotoPropia(URL.createObjectURL(file));
-      setErrorCamara(null);
-    }
-  };
-  const iniciarMovimiento = (clientX: number, clientY: number) => {
-    setArrastrando(true);
-    inicioArrastre.current = { x: clientX - posPrenda.x, y: clientY - posPrenda.y };
-  };
-
-  const moverPrenda = (clientX: number, clientY: number) => {
-    if (!arrastrando) return;
-    setPosPrenda({
-      x: clientX - inicioArrastre.current.x,
-      y: clientY - inicioArrastre.current.y,
-    });
-  };
-
-  const detenerMovimiento = () => {
-    setArrastrando(false);
-  };
-
-  const capturarLook = () => {
-    const canvas = canvasCapturaRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    canvas.width = 720;
-    canvas.height = 960;
-
-    if (videoRef.current && !fotoPropia) {
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoRef.current, -canvas.width, 0, canvas.width, canvas.height);
-      ctx.restore();
-    } else if (fotoPropia) {
-      const imgFondo = new Image();
-      imgFondo.src = fotoPropia;
-      ctx.drawImage(imgFondo, 0, 0, canvas.width, canvas.height);
-    }
-
-    if (esBelleza) {
-      // Aplicar rubor en mejillas en la captura
-      if (ruborActivo.opacidad > 0) {
-        ctx.fillStyle = ruborActivo.color;
-        ctx.globalAlpha = ruborActivo.opacidad;
-        ctx.filter = "blur(28px)";
-        ctx.beginPath();
-        ctx.arc(canvas.width * 0.34, canvas.height * 0.53, 55, 0, Math.PI * 2);
-        ctx.arc(canvas.width * 0.66, canvas.height * 0.53, 55, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      // Aplicar labial en la captura
-      if (labialActivo.opacidad > 0) {
-        ctx.fillStyle = labialActivo.color;
-        ctx.globalAlpha = labialActivo.opacidad;
-        ctx.filter = "blur(8px)";
-        ctx.beginPath();
-        ctx.ellipse(canvas.width * 0.5, canvas.height * 0.67, 52, 22, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.filter = "none";
-      ctx.globalAlpha = 1;
-    }
-
-    setFotoCapturada(canvas.toDataURL("image/png"));
+  const tomarFoto = () => {
+    if (!canvasRef.current) return;
+    setFotoCapturada(canvasRef.current.toDataURL("image/png"));
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#5E3A36]/30 backdrop-blur-xs overflow-y-auto">
       <div className="bg-[#FDF8F6] rounded-3xl max-w-lg w-full p-5 sm:p-6 gold-ring-border shadow-2xl relative my-4">
         <button
           onClick={() => {
-            setFotoPropia(null);
             setFotoCapturada(null);
             alCerrar();
           }}
@@ -185,141 +328,57 @@ export default function ProbadorAR({
 
         <div className="flex items-center gap-2 text-xs font-medium text-[#C89B54] mb-0.5">
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Probador Virtual AR · {categoria}</span>
+          <span>Espejo Inteligente Jadara AI · {categoria}</span>
         </div>
         <h3 className="text-lg sm:text-xl font-serif text-[#5E3A36] mb-3 pr-8">
           {nombreProducto}
         </h3>
 
-        <input
-          ref={inputFotoPropiaRef}
-          type="file"
-          accept="image/*"
-          onChange={manejarSubidaFotoPropia}
-          className="hidden"
-        />
-        <canvas ref={canvasCapturaRef} className="hidden" />
+        <div className="relative h-80 sm:h-96 rounded-2xl overflow-hidden bg-[#F7E6E1] gold-ring-border flex items-center justify-center">
+          <video ref={videoRef} playsInline muted className="hidden" />
 
-        {/* Visor Interactivo en Vivo */}
-        <div
-          onMouseMove={(e) => moverPrenda(e.clientX, e.clientY)}
-          onMouseUp={detenerMovimiento}
-          onMouseLeave={detenerMovimiento}
-          onTouchMove={(e) => {
-            const touch = e.touches[0];
-            if (touch) moverPrenda(touch.clientX, touch.clientY);
-          }}
-          onTouchEnd={detenerMovimiento}
-          className="relative h-80 sm:h-96 rounded-2xl overflow-hidden bg-[#F7E6E1] gold-ring-border flex items-center justify-center select-none"
-        >
-          {fotoCapturada ? (
-            <img
-              src={fotoCapturada}
-              alt="Look capturado"
-              className="w-full h-full object-cover"
-            />
-          ) : fotoPropia ? (
-            <img
-              src={fotoPropia}
-              alt="Tu foto"
-              className="w-full h-full object-cover"
-            />
-          ) : errorCamara ? (
-            <div className="p-6 text-center space-y-3">
+          {cargandoIA && !errorCamara && (
+            <div className="absolute inset-0 z-10 bg-[#FDF8F6]/90 flex flex-col items-center justify-center gap-2 text-xs text-[#5E3A36]">
+              <Loader2 className="w-7 h-7 text-[#C6736A] animate-spin" />
+              <span>Calibrando espejo inteligente AR...</span>
+            </div>
+          )}
+
+          {errorCamara ? (
+            <div className="p-6 text-center space-y-2">
               <Camera className="w-8 h-8 text-[#C6736A] mx-auto" />
               <p className="text-xs text-[#5E3A36]">{errorCamara}</p>
-              <button
-                type="button"
-                onClick={() => inputFotoPropiaRef.current?.click()}
-                className="px-4 py-2 rounded-full bg-[#C6736A] text-white text-xs font-medium cursor-pointer"
-              >
-                Subir mi foto para probar
-              </button>
             </div>
-          ) : (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover scale-x-[-1]"
+          ) : fotoCapturada ? (
+            <img
+              src={fotoCapturada}
+              alt="Captura AR"
+              className="w-full h-full object-cover"
             />
+          ) : (
+            <canvas ref={canvasRef} className="w-full h-full object-cover" />
           )}
 
-          {/* Capa AR para Belleza (Guía facial + Rubor + Labial en vivo) */}
-          {esBelleza && !errorCamara && !fotoCapturada && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="w-48 h-64 rounded-full border border-dashed border-white/60 relative">
-                {/* Mejillas (Rubor) */}
-                <div
-                  style={{
-                    backgroundColor: ruborActivo.color,
-                    opacity: ruborActivo.opacidad,
-                  }}
-                  className="absolute top-[52%] left-[12%] w-12 h-9 rounded-full blur-md transition-all duration-300"
-                />
-                <div
-                  style={{
-                    backgroundColor: ruborActivo.color,
-                    opacity: ruborActivo.opacidad,
-                  }}
-                  className="absolute top-[52%] right-[12%] w-12 h-9 rounded-full blur-md transition-all duration-300"
-                />
-                {/* Labios (Labial) */}
-                <div
-                  style={{
-                    backgroundColor: labialActivo.color,
-                    opacity: labialActivo.opacidad,
-                  }}
-                  className="absolute bottom-[18%] left-1/2 -translate-x-1/2 w-14 h-6 rounded-full blur-[3px] transition-all duration-300"
-                />
-              </div>
-              <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-white/85 text-[10px] font-medium text-[#5E3A36]">
-                Ubica tu rostro en el óvalo
-              </span>
-            </div>
-          )}
-
-          {/* Capa AR para Ropa, Carteras y Tenis (Foto real arrastrable y escalable) */}
-          {!esBelleza && !errorCamara && !fotoCapturada && (
-            <div
-              onMouseDown={(e) => iniciarMovimiento(e.clientX, e.clientY)}
-              onTouchStart={(e) => {
-                const touch = e.touches[0];
-                if (touch) iniciarMovimiento(touch.clientX, touch.clientY);
-              }}
-              style={{
-                transform: `translate(${posPrenda.x}px, ${posPrenda.y}px) scale(${escalaPrenda})`,
-              }}
-              className="absolute cursor-grab active:cursor-grabbing flex flex-col items-center"
+          {!errorCamara && !fotoCapturada && (
+            <button
+              type="button"
+              onClick={() => setCamaraFrontal((prev) => !prev)}
+              title="Voltear cámara"
+              className="absolute top-3 right-3 px-3 py-1.5 rounded-full bg-white/90 gold-ring-border text-[#5E3A36] text-[11px] font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
             >
-              {imagenProducto ? (
-                <img
-                  src={imagenProducto}
-                  alt={nombreProducto}
-                  draggable={false}
-                  className="w-44 h-44 sm:w-52 sm:h-52 object-contain drop-shadow-xl rounded-2xl mix-blend-multiply"
-                />
-              ) : (
-                <div className="px-4 py-3 rounded-2xl bg-white/90 gold-ring-border text-xs font-serif text-[#5E3A36] shadow-md">
-                  {nombreProducto}
-                </div>
-              )}
-              <span className="mt-1 px-2.5 py-0.5 rounded-full bg-black/55 text-white text-[10px] flex items-center gap-1">
-                <Move className="w-2.5 h-2.5" /> Arrastra sobre ti
-              </span>
-            </div>
+              <SwitchCamera className="w-3.5 h-3.5 text-[#C6736A]" />
+              <span>{camaraFrontal ? "Cámara Frontal" : "Cámara Trasera"}</span>
+            </button>
           )}
         </div>
-        {/* Panel de Controles Según Categoría */}
         <div className="mt-4 space-y-3">
           {esBelleza ? (
             <>
               <div>
                 <span className="block text-[11px] font-semibold text-[#5E3A36] mb-1.5">
-                  Tono de Labial: <span className="text-[#C6736A]">{labialActivo.nombre}</span>
+                  Labial en vivo: <span className="text-[#C6736A]">{labialActivo.nombre}</span>
                 </span>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   {TONOS_LABIAL.map((tono) => (
                     <button
                       key={tono.nombre}
@@ -346,9 +405,9 @@ export default function ProbadorAR({
 
               <div>
                 <span className="block text-[11px] font-semibold text-[#5E3A36] mb-1.5">
-                  Tono de Rubor: <span className="text-[#C89B54]">{ruborActivo.nombre}</span>
+                  Rubor en vivo: <span className="text-[#C89B54]">{ruborActivo.nombre}</span>
                 </span>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   {TONOS_RUBOR.map((rubor) => (
                     <button
                       key={rubor.nombre}
@@ -374,63 +433,67 @@ export default function ProbadorAR({
               </div>
             </>
           ) : (
-            <div className="flex items-center justify-between bg-white p-2.5 rounded-2xl gold-ring-border">
-              <span className="text-xs font-medium text-[#5E3A36]">
-                Ajustar tamaño de prenda:
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEscalaPrenda((s) => Math.max(0.5, s - 0.15))}
-                  className="p-1.5 rounded-full bg-[#FDF8F6] gold-ring-border text-[#5E3A36] cursor-pointer"
-                >
-                  <ZoomOut className="w-4 h-4" />
-                </button>
-                <span className="text-xs font-semibold w-10 text-center">
-                  {Math.round(escalaPrenda * 100)}%
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setEscalaPrenda((s) => Math.min(2, s + 0.15))}
-                  className="p-1.5 rounded-full bg-[#FDF8F6] gold-ring-border text-[#5E3A36] cursor-pointer"
-                >
-                  <ZoomIn className="w-4 h-4" />
-                </button>
+            <div className="bg-white p-3 rounded-2xl gold-ring-border space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#5E3A36]">
+                <Sliders className="w-3.5 h-3.5 text-[#C89B54]" />
+                <span>Ajuste fino sobre tu silueta:</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-[11px] text-[#9E7B74]">
+                <label className="flex flex-col gap-1">
+                  <span>Ancho de prenda</span>
+                  <input
+                    type="range"
+                    min="0.9"
+                    max="2.0"
+                    step="0.05"
+                    value={ajusteAncho}
+                    onChange={(e) => setAjusteAncho(Number(e.target.value))}
+                    className="accent-[#C6736A]"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span>Altura (Subir / Bajar)</span>
+                  <input
+                    type="range"
+                    min="-80"
+                    max="80"
+                    step="5"
+                    value={ajusteAltura}
+                    onChange={(e) => setAjusteAltura(Number(e.target.value))}
+                    className="accent-[#C89B54]"
+                  />
+                </label>
               </div>
             </div>
           )}
 
-          {/* Barra de Acciones: Subir foto de cuerpo completo / Tomar Selfie / Descargar */}
           <div className="grid grid-cols-2 gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                setFotoCapturada(null);
-                inputFotoPropiaRef.current?.click();
-              }}
-              className="py-2.5 px-3 rounded-full bg-white gold-ring-border text-xs font-semibold text-[#5E3A36] flex items-center justify-center gap-1.5 hover:bg-[#FDF8F6] cursor-pointer"
-            >
-              <Upload className="w-3.5 h-3.5 text-[#C89B54]" />
-              <span>{fotoPropia ? "Cambiar mi foto" : "Probar en mi foto"}</span>
-            </button>
-
             {fotoCapturada ? (
-              <a
-                href={fotoCapturada}
-                download={`Jadara-Look-${nombreProducto}.png`}
-                className="py-2.5 px-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-1.5"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Guardar Foto</span>
-              </a>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setFotoCapturada(null)}
+                  className="py-2.5 px-3 rounded-full bg-white gold-ring-border text-xs font-semibold text-[#5E3A36] cursor-pointer"
+                >
+                  Volver al Espejo
+                </button>
+                <a
+                  href={fotoCapturada}
+                  download={`Jadara-AR-${nombreProducto}.png`}
+                  className="py-2.5 px-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Guardar Foto</span>
+                </a>
+              </>
             ) : (
               <button
                 type="button"
-                onClick={capturarLook}
-                className="py-2.5 px-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                onClick={tomarFoto}
+                className="col-span-2 py-3 px-4 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-xs cursor-pointer"
               >
-                <Camera className="w-3.5 h-3.5" />
-                <span>Tomar Foto</span>
+                <Camera className="w-4 h-4" />
+                <span>Capturar Foto del Look</span>
               </button>
             )}
           </div>
