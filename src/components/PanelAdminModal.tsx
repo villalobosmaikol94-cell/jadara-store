@@ -13,8 +13,21 @@ import {
   AlertTriangle,
   X,
   RotateCcw,
+  Palette,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+
+export interface VarianteColor {
+  nombre: string;
+  hex: string;
+  imagenUrl: string | null;
+}
+
+interface VarianteColorForm {
+  nombre: string;
+  hex: string;
+  archivo: File | null;
+}
 
 interface ProductoDB {
   id: number;
@@ -25,6 +38,7 @@ interface ProductoDB {
   stock: number;
   imagen_url: string | null;
   opciones: string[];
+  colores_fotos?: VarianteColor[];
 }
 
 interface VentaDB {
@@ -43,6 +57,33 @@ interface PanelProps {
 }
 
 const PIN_ACCESO = "2026";
+
+const TALLAS_DISPONIBLES = [
+  "Única",
+  "XS",
+  "S",
+  "M",
+  "L",
+  "XL",
+  "35",
+  "36",
+  "37",
+  "38",
+  "39",
+  "40",
+];
+
+const PALETA_RAPIDA = [
+  { nombre: "Rosa Pétalo", hex: "#E8B4B8" },
+  { nombre: "Crema", hex: "#F5EFE6" },
+  { nombre: "Terracota", hex: "#C6736A" },
+  { nombre: "Dorado", hex: "#C89B54" },
+  { nombre: "Blanco", hex: "#FFFFFF" },
+  { nombre: "Beige", hex: "#D8C3A5" },
+  { nombre: "Lila Suave", hex: "#D4BBE6" },
+  { nombre: "Azul Cielo", hex: "#B8D4E3" },
+  { nombre: "Verde Salvia", hex: "#B5C9B8" },
+];
 export default function PanelAdminModal({
   abierto,
   alCerrar,
@@ -58,13 +99,17 @@ export default function PanelAdminModal({
   const [mensaje, setMensaje] = useState<string | null>(null);
 
   const [nombre, setNombre] = useState("");
-  const [categoria, setCategoria] = useState("Belleza");
+  const [categoria, setCategoria] = useState("Ropa Dama");
   const [precioVenta, setPrecioVenta] = useState("");
   const [costoCompra, setCostoCompra] = useState("");
   const [stock, setStock] = useState("5");
-  const [opcionesTexto, setOpcionesTexto] = useState("Única");
+  const [tallasSeleccionadas, setTallasSeleccionadas] = useState<string[]>(["S", "M", "L"]);
   const [descripcion, setDescripcion] = useState("");
-  const [archivoFoto, setArchivoFoto] = useState<File | null>(null);
+  const [archivoPrincipal, setArchivoPrincipal] = useState<File | null>(null);
+
+  const [coloresForm, setColoresForm] = useState<VarianteColorForm[]>([]);
+  const [nuevoColorNombre, setNuevoColorNombre] = useState("Rosa Pétalo");
+  const [nuevoColorHex, setNuevoColorHex] = useState("#E8B4B8");
 
   const cargarDatos = async () => {
     const { data: prods } = await supabase
@@ -96,32 +141,72 @@ export default function PanelAdminModal({
       alert("PIN incorrecto");
     }
   };
+
+  const alternarTalla = (talla: string) => {
+    setTallasSeleccionadas((prev) =>
+      prev.includes(talla) ? prev.filter((t) => t !== talla) : [...prev, talla]
+    );
+  };
+
+  const agregarColorLista = () => {
+    if (!nuevoColorNombre.trim()) return;
+    setColoresForm((prev) => [
+      ...prev,
+      { nombre: nuevoColorNombre.trim(), hex: nuevoColorHex, archivo: null },
+    ]);
+  };
+
+  const asignarFotoAColor = (index: number, file: File | null) => {
+    setColoresForm((prev) =>
+      prev.map((c, idx) => (idx === index ? { ...c, archivo: file } : c))
+    );
+  };
+
+  const quitarColorLista = (index: number) => {
+    setColoresForm((prev) => prev.filter((_, idx) => idx !== index));
+  };
+  const subirImagenStorage = async (archivo: File): Promise<string | null> => {
+    const nombreArchivo = `${Date.now()}-${Math.floor(Math.random() * 1000)}-${archivo.name.replace(/\s+/g, "-")}`;
+    const { error } = await supabase.storage
+      .from("fotos-jadara")
+      .upload(nombreArchivo, archivo);
+
+    if (!error) {
+      const { data } = supabase.storage
+        .from("fotos-jadara")
+        .getPublicUrl(nombreArchivo);
+      return data.publicUrl;
+    }
+    return null;
+  };
+
   const guardarProducto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nombre || !precioVenta || !costoCompra) return;
     setCargando(true);
     setMensaje(null);
 
-    let urlPublica: string | null = null;
-
-    if (archivoFoto) {
-      const nombreArchivo = `${Date.now()}-${archivoFoto.name.replace(/\s+/g, "-")}`;
-      const { error: errorSubida } = await supabase.storage
-        .from("fotos-jadara")
-        .upload(nombreArchivo, archivoFoto);
-
-      if (!errorSubida) {
-        const { data } = supabase.storage
-          .from("fotos-jadara")
-          .getPublicUrl(nombreArchivo);
-        urlPublica = data.publicUrl;
-      }
+    let urlPrincipal: string | null = null;
+    if (archivoPrincipal) {
+      urlPrincipal = await subirImagenStorage(archivoPrincipal);
     }
 
-    const listaOpciones = opcionesTexto
-      .split(",")
-      .map((op) => op.trim())
-      .filter(Boolean);
+    const coloresSubidos: VarianteColor[] = [];
+    for (const c of coloresForm) {
+      let urlColor: string | null = null;
+      if (c.archivo) {
+        urlColor = await subirImagenStorage(c.archivo);
+      }
+      coloresSubidos.push({
+        nombre: c.nombre,
+        hex: c.hex,
+        imagenUrl: urlColor || urlPrincipal,
+      });
+    }
+
+    if (!urlPrincipal && coloresSubidos.length > 0) {
+      urlPrincipal = coloresSubidos.at(0)?.imagenUrl ?? null;
+    }
 
     const { error } = await supabase.from("productos").insert([
       {
@@ -130,21 +215,23 @@ export default function PanelAdminModal({
         precio_venta: Number(precioVenta),
         costo_compra: Number(costoCompra),
         stock: Number(stock),
-        imagen_url: urlPublica,
-        opciones: listaOpciones.length > 0 ? listaOpciones : ["Única"],
+        imagen_url: urlPrincipal,
+        opciones: tallasSeleccionadas.length > 0 ? tallasSeleccionadas : ["Única"],
+        colores_fotos: coloresSubidos,
         descripcion,
       },
     ]);
 
     setCargando(false);
     if (!error) {
-      setMensaje("Producto publicado en tu tienda Jadara.");
+      setMensaje("Producto publicado con sus tallas y colores en Jadara.");
       setNombre("");
       setPrecioVenta("");
       setCostoCompra("");
       setStock("5");
       setDescripcion("");
-      setArchivoFoto(null);
+      setArchivoPrincipal(null);
+      setColoresForm([]);
       cargarDatos();
       alActualizarCatalogo();
     } else {
@@ -173,7 +260,7 @@ export default function PanelAdminModal({
   };
 
   const resetearFinanzas = async () => {
-    if (!confirm("¿Seguro que deseas resetear TODAS las finanzas y borrar el historial a $0?")) return;
+    if (!confirm("¿Seguro que deseas resetear TODAS las finanzas a $0?")) return;
     await supabase.from("ventas").delete().neq("id", 0);
     cargarDatos();
   };
@@ -239,7 +326,7 @@ export default function PanelAdminModal({
               JADARA STUDIO
             </span>
             <span className="block text-[10px] uppercase tracking-widest text-[#9E7B74]">
-              Inventario, Fotos & Contabilidad en Vivo
+              Tallas, Colores, Stock & Finanzas
             </span>
           </div>
           <button
@@ -258,7 +345,7 @@ export default function PanelAdminModal({
             }`}
           >
             <PlusCircle className="w-4 h-4" />
-            <span>Subir</span>
+            <span>Publicar</span>
           </button>
           <button
             onClick={() => setPestana("inventario")}
@@ -279,7 +366,6 @@ export default function PanelAdminModal({
             <span>Finanzas</span>
           </button>
         </div>
-
         {pestana === "subir" && (
           <form onSubmit={guardarProducto} className="space-y-4 max-w-xl mx-auto">
             {mensaje && (
@@ -289,17 +375,17 @@ export default function PanelAdminModal({
               </div>
             )}
 
-            <label className="block border-2 border-dashed border-[#C89B54]/50 rounded-2xl p-5 text-center bg-white cursor-pointer">
-              <Upload className="w-7 h-7 text-[#C6736A] mx-auto mb-1" />
+            <label className="block border-2 border-dashed border-[#C89B54]/50 rounded-2xl p-4 text-center bg-white cursor-pointer">
+              <Upload className="w-6 h-6 text-[#C6736A] mx-auto mb-1" />
               <span className="block text-xs font-medium text-[#5E3A36]">
-                {archivoFoto
-                  ? `Foto lista: ${archivoFoto.name}`
-                  : "Toca aquí para tomar foto o elegir de tu galería"}
+                {archivoPrincipal
+                  ? `Foto portada lista: ${archivoPrincipal.name}`
+                  : "Toca aquí para subir la foto principal de portada"}
               </span>
               <input
                 type="file"
                 accept="image/*"
-                onChange={(e) => setArchivoFoto(e.target.files?.item(0) ?? null)}
+                onChange={(e) => setArchivoPrincipal(e.target.files?.item(0) ?? null)}
                 className="hidden"
               />
             </label>
@@ -310,7 +396,7 @@ export default function PanelAdminModal({
                 required
                 value={nombre}
                 onChange={(e) => setNombre(e.target.value)}
-                placeholder="Nombre del producto"
+                placeholder="Ej: Conjunto Seda Primavera"
                 className="w-full px-3.5 py-2.5 rounded-xl bg-white gold-ring-border text-sm"
               />
               <select
@@ -318,10 +404,10 @@ export default function PanelAdminModal({
                 onChange={(e) => setCategoria(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-white gold-ring-border text-sm"
               >
+                <option>Ropa Dama</option>
                 <option>Belleza</option>
                 <option>Carteras</option>
                 <option>Tenis</option>
-                <option>Ropa Dama</option>
               </select>
             </div>
 
@@ -352,20 +438,127 @@ export default function PanelAdminModal({
               />
             </div>
 
-            <input
-              type="text"
-              value={opcionesTexto}
-              onChange={(e) => setOpcionesTexto(e.target.value)}
-              placeholder="Tallas o tonos (ej: Talla 36, Talla 37, Talla 38)"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-white gold-ring-border text-sm"
-            />
+            <div className="bg-white p-3.5 rounded-2xl gold-ring-border">
+              <span className="block text-xs font-semibold text-[#5E3A36] mb-2">
+                1. Toca las tallas que tienes disponibles:
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {TALLAS_DISPONIBLES.map((talla) => {
+                  const activa = tallasSeleccionadas.includes(talla);
+                  return (
+                    <button
+                      type="button"
+                      key={talla}
+                      onClick={() => alternarTalla(talla)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold transition cursor-pointer ${
+                        activa
+                          ? "bg-[#C6736A] text-white"
+                          : "bg-[#FDF8F6] text-[#9E7B74] gold-ring-border"
+                      }`}
+                    >
+                      {talla}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="bg-white p-3.5 rounded-2xl gold-ring-border space-y-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-[#5E3A36]">
+                <Palette className="w-4 h-4 text-[#C89B54]" />
+                <span>2. Colores disponibles (cada color puede llevar su foto):</span>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {PALETA_RAPIDA.map((p) => (
+                  <button
+                    type="button"
+                    key={p.nombre}
+                    onClick={() => {
+                      setNuevoColorNombre(p.nombre);
+                      setNuevoColorHex(p.hex);
+                    }}
+                    className="px-2.5 py-1 rounded-full bg-[#FDF8F6] gold-ring-border text-[11px] flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span
+                      className="w-3 h-3 rounded-full border border-black/15"
+                      style={{ backgroundColor: p.hex }}
+                    />
+                    <span>{p.nombre}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="color"
+                  value={nuevoColorHex}
+                  onChange={(e) => setNuevoColorHex(e.target.value)}
+                  className="w-10 h-9 rounded-lg border-0 cursor-pointer"
+                />
+                <input
+                  type="text"
+                  value={nuevoColorNombre}
+                  onChange={(e) => setNuevoColorNombre(e.target.value)}
+                  placeholder="Nombre del color"
+                  className="flex-1 px-3 py-1.5 rounded-xl bg-[#FDF8F6] gold-ring-border text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={agregarColorLista}
+                  className="px-3.5 py-1.5 rounded-xl bg-[#F7E6E1] text-[#C6736A] text-xs font-semibold cursor-pointer"
+                >
+                  + Color
+                </button>
+              </div>
+
+              {coloresForm.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-[#FDF8F6]">
+                  {coloresForm.map((col, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between gap-2 bg-[#FDF8F6] p-2 rounded-xl gold-ring-border text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-4 h-4 rounded-full border border-black/20 shrink-0"
+                          style={{ backgroundColor: col.hex }}
+                        />
+                        <span className="font-medium">{col.nombre}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <label className="px-2.5 py-1 rounded-lg bg-white gold-ring-border text-[11px] font-medium text-[#C6736A] cursor-pointer">
+                          {col.archivo ? "Foto lista ✓" : "Subir foto"}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) =>
+                              asignarFotoAColor(idx, e.target.files?.item(0) ?? null)
+                            }
+                            className="hidden"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => quitarColorLista(idx)}
+                          className="text-[#9E7B74] hover:text-red-600 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <button
               type="submit"
               disabled={cargando}
               className="w-full py-3.5 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-sm font-medium cursor-pointer"
             >
-              {cargando ? "Publicando..." : "Publicar en Tienda Jadara"}
+              {cargando ? "Subiendo fotos y publicando..." : "Publicar en Tienda Jadara"}
             </button>
           </form>
         )}
@@ -432,7 +625,6 @@ export default function PanelAdminModal({
             })}
           </div>
         )}
-
         {pestana === "contabilidad" && (
           <div className="space-y-5">
             <div className="flex items-center justify-between">

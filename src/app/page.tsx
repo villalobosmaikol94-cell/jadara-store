@@ -19,7 +19,7 @@ import {
 import { supabase } from "../lib/supabase";
 import ProbadorAR from "../components/ProbadorAR";
 import CheckoutWhatsApp from "../components/CheckoutWhatsApp";
-import PanelAdminModal from "../components/PanelAdminModal";
+import PanelAdminModal, { VarianteColor } from "../components/PanelAdminModal";
 
 interface Producto {
   id: number;
@@ -33,6 +33,7 @@ interface Producto {
   tonoFondo: string;
   descripcion: string;
   opciones: string[];
+  coloresFotos: VarianteColor[];
   esRealDB: boolean;
 }
 
@@ -56,7 +57,8 @@ const CATALOGO_DEMO: Producto[] = [
     tonoFondo: "bg-[#F9EAE6]",
     descripcion:
       "Fórmula botánica iluminadora con extracto de rosa y vitamina C pura para un brillo natural.",
-    opciones: ["30 ml · Iluminador", "50 ml · Efecto Seda"],
+    opciones: ["30 ml", "50 ml"],
+    coloresFotos: [],
     esRealDB: false,
   },
   {
@@ -71,7 +73,12 @@ const CATALOGO_DEMO: Producto[] = [
     tonoFondo: "bg-[#F6EDE7]",
     descripcion:
       "Acabado vegano premium con herrajes dorado champán y correa ajustable de lujo.",
-    opciones: ["Rosa Pétalo", "Crema Alabastro", "Terracota Suave"],
+    opciones: ["Única"],
+    coloresFotos: [
+      { nombre: "Rosa Pétalo", hex: "#E8B4B8", imagenUrl: null },
+      { nombre: "Crema", hex: "#F5EFE6", imagenUrl: null },
+      { nombre: "Terracota", hex: "#C6736A", imagenUrl: null },
+    ],
     esRealDB: false,
   },
   {
@@ -86,12 +93,16 @@ const CATALOGO_DEMO: Producto[] = [
     tonoFondo: "bg-[#FAF2EE]",
     descripcion:
       "Suela ergonómica ultraligera diseñada para caminar con elegancia durante todo el día.",
-    opciones: ["Talla 36", "Talla 37", "Talla 38", "Talla 39"],
+    opciones: ["36", "37", "38", "39"],
+    coloresFotos: [
+      { nombre: "Blanco", hex: "#FFFFFF", imagenUrl: null },
+      { nombre: "Beige", hex: "#D8C3A5", imagenUrl: null },
+    ],
     esRealDB: false,
   },
   {
     id: 104,
-    nombre: "Vestido Seda Fluida Terracota Suave",
+    nombre: "Conjunto Seda Fluida Primavera",
     categoria: "Ropa Dama",
     precio: 215000,
     costo: 110000,
@@ -101,7 +112,12 @@ const CATALOGO_DEMO: Producto[] = [
     tonoFondo: "bg-[#F5E6E3]",
     descripcion:
       "Caída fluida que estiliza la silueta con tela transpirable de tacto suave.",
-    opciones: ["Talla S", "Talla M", "Talla L"],
+    opciones: ["S", "M", "L"],
+    coloresFotos: [
+      { nombre: "Terracota", hex: "#C6736A", imagenUrl: null },
+      { nombre: "Rosa Pétalo", hex: "#E8B4B8", imagenUrl: null },
+      { nombre: "Crema", hex: "#F5EFE6", imagenUrl: null },
+    ],
     esRealDB: false,
   },
 ];
@@ -113,11 +129,14 @@ export default function JadaraStore() {
   const [checkoutAbierto, setCheckoutAbierto] = useState<boolean>(false);
   const [adminAbierto, setAdminAbierto] = useState<boolean>(false);
 
+  const [colorTarjetaActivo, setColorTarjetaActivo] = useState<Record<number, number>>({});
+
   const [consultaIA, setConsultaIA] = useState<string>("");
   const [lookSugerido, setLookSugerido] = useState<Producto[] | null>(null);
 
   const [productoVistaRapida, setProductoVistaRapida] = useState<Producto | null>(null);
-  const [opcionActiva, setOpcionActiva] = useState<string>("");
+  const [tallaActiva, setTallaActiva] = useState<string>("");
+  const [colorModalActivo, setColorModalActivo] = useState<VarianteColor | null>(null);
   const [rotacion3D, setRotacion3D] = useState<number>(0);
 
   const [productoProbadorAR, setProductoProbadorAR] = useState<Producto | null>(null);
@@ -145,6 +164,7 @@ export default function JadaraStore() {
         descripcion:
           p.descripcion || "Pieza exclusiva Jadara diseñada con propósito y estilo.",
         opciones: p.opciones && p.opciones.length > 0 ? p.opciones : ["Única"],
+        coloresFotos: Array.isArray(p.colores_fotos) ? p.colores_fotos : [],
         esRealDB: true,
       }));
       setCatalogo(formateados);
@@ -164,13 +184,18 @@ export default function JadaraStore() {
 
   const abrirVistaRapida = (producto: Producto) => {
     setProductoVistaRapida(producto);
-    setOpcionActiva(producto.opciones.at(0) ?? "Única");
+    setTallaActiva(producto.opciones.at(0) ?? "Única");
+    const indiceColorTarjeta = colorTarjetaActivo[producto.id] ?? 0;
+    setColorModalActivo(producto.coloresFotos.at(indiceColorTarjeta) ?? null);
     setRotacion3D(0);
   };
 
-  const agregarAlCarrito = (producto: Producto, opcion?: string) => {
+  const agregarAlCarrito = (producto: Producto, talla?: string, color?: VarianteColor | null) => {
     if (producto.stock <= 0) return;
-    const elegida = opcion || (producto.opciones.at(0) ?? "Única");
+    const tallaFinal = talla || (producto.opciones.at(0) ?? "Única");
+    const colorFinal = color ? `Color: ${color.nombre} · ` : "";
+    const elegida = `${colorFinal}Talla: ${tallaFinal}`;
+
     setCarrito((prev) => {
       const existe = prev.find(
         (item) => item.producto.id === producto.id && item.opcionSeleccionada === elegida
@@ -382,82 +407,128 @@ export default function JadaraStore() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-7">
-            {productosFiltrados.map((producto) => (
-              <div
-                key={producto.id}
-                className="group bg-white rounded-3xl p-4 gold-ring-border hover:shadow-md transition-all duration-300"
-              >
+            {productosFiltrados.map((producto) => {
+              const indiceColor = colorTarjetaActivo[producto.id] ?? 0;
+              const varianteSeleccionada = producto.coloresFotos.at(indiceColor);
+              const fotoMostrar = varianteSeleccionada?.imagenUrl || producto.imagenUrl;
+
+              return (
                 <div
-                  onClick={() => abrirVistaRapida(producto)}
-                  className={`h-60 rounded-2xl ${producto.tonoFondo} mb-4 relative flex items-center justify-center overflow-hidden cursor-pointer`}
+                  key={producto.id}
+                  className="group bg-white rounded-3xl p-4 gold-ring-border hover:shadow-md transition-all duration-300 flex flex-col justify-between"
                 >
-                  {producto.imagenUrl ? (
-                    <img
-                      src={producto.imagenUrl}
-                      alt={producto.nombre}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                    />
-                  ) : (
-                    <span className="text-xs text-[#9E7B74] tracking-widest uppercase">
-                      Foto {producto.categoria}
-                    </span>
-                  )}
-
-                  <span
-                    className={`absolute top-3 left-3 px-3 py-1 rounded-full bg-white/95 text-[11px] font-medium gold-ring-border ${
-                      producto.stock <= 0 ? "text-red-500" : "text-[#C89B54]"
-                    }`}
-                  >
-                    {producto.badge}
-                  </span>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      abrirVistaRapida(producto);
-                    }}
-                    title="Vista 3D Interactiva"
-                    className="opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-3 right-3 p-2.5 rounded-full bg-white text-[#C6736A] gold-ring-border shadow-xs cursor-pointer"
-                  >
-                    <Eye className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-[#C89B54] uppercase tracking-widest font-medium mb-1">
-                  {producto.categoria}
-                </p>
-                <h3 className="font-medium text-base text-[#5E3A36] mb-3">
-                  {producto.nombre}
-                </h3>
-
-                <div className="flex items-center justify-between pt-3 border-t border-[#FDF8F6]">
-                  <span className="font-semibold text-[#5E3A36]">
-                    ${producto.precio.toLocaleString("es-CO")}
-                  </span>
-                  <div className="flex gap-1.5">
-                    <button
-                      onClick={() => setProductoProbadorAR(producto)}
-                      className="px-2.5 py-1.5 rounded-full bg-white text-[#C89B54] gold-ring-border text-xs font-medium hover:bg-[#FDF8F6] cursor-pointer"
-                    >
-                      Probar AR
-                    </button>
-                    <button
-                      disabled={producto.stock <= 0}
+                  <div>
+                    <div
                       onClick={() => abrirVistaRapida(producto)}
-                      className="px-3 py-1.5 rounded-full bg-[#F7E6E1] text-[#C6736A] text-xs font-semibold hover:bg-[#C6736A] hover:text-white transition cursor-pointer disabled:opacity-40"
+                      className={`h-60 rounded-2xl ${producto.tonoFondo} mb-3 relative flex items-center justify-center overflow-hidden cursor-pointer`}
                     >
-                      {producto.stock <= 0 ? "Agotado" : "Elegir"}
-                    </button>
+                      {fotoMostrar ? (
+                        <img
+                          src={fotoMostrar}
+                          alt={producto.nombre}
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                        />
+                      ) : (
+                        <div className="text-center px-3">
+                          <span className="block text-xs text-[#9E7B74] tracking-widest uppercase">
+                            {producto.categoria}
+                          </span>
+                          {varianteSeleccionada && (
+                            <span className="block text-[11px] text-[#C6736A] font-medium mt-1">
+                              Color: {varianteSeleccionada.nombre}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      <span
+                        className={`absolute top-3 left-3 px-3 py-1 rounded-full bg-white/95 text-[11px] font-medium gold-ring-border ${
+                          producto.stock <= 0 ? "text-red-500" : "text-[#C89B54]"
+                        }`}
+                      >
+                        {producto.badge}
+                      </span>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          abrirVistaRapida(producto);
+                        }}
+                        title="Vista 3D Interactiva"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-3 right-3 p-2.5 rounded-full bg-white text-[#C6736A] gold-ring-border shadow-xs cursor-pointer"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-[11px] text-[#C89B54] uppercase tracking-widest font-medium">
+                        {producto.categoria}
+                      </p>
+
+                      {producto.coloresFotos.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          {producto.coloresFotos.map((col, idx) => (
+                            <button
+                              key={col.nombre + idx}
+                              type="button"
+                              title={`Ver color ${col.nombre}`}
+                              onClick={() =>
+                                setColorTarjetaActivo((prev) => ({
+                                  ...prev,
+                                  [producto.id]: idx,
+                                }))
+                              }
+                              className={`w-4 h-4 rounded-full border transition-transform cursor-pointer ${
+                                indiceColor === idx
+                                  ? "scale-125 border-[#C6736A] ring-2 ring-[#C6736A]/30"
+                                  : "border-black/20 hover:scale-110"
+                              }`}
+                              style={{ backgroundColor: col.hex }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <h3 className="font-medium text-base text-[#5E3A36] mb-1">
+                      {producto.nombre}
+                    </h3>
+
+                    <p className="text-[11px] text-[#9E7B74] mb-3">
+                      Tallas: {producto.opciones.join(" · ")}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-3 border-t border-[#FDF8F6]">
+                    <span className="font-semibold text-[#5E3A36]">
+                      ${producto.precio.toLocaleString("es-CO")}
+                    </span>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => setProductoProbadorAR(producto)}
+                        className="px-2.5 py-1.5 rounded-full bg-white text-[#C89B54] gold-ring-border text-xs font-medium hover:bg-[#FDF8F6] cursor-pointer"
+                      >
+                        Probar AR
+                      </button>
+                      <button
+                        disabled={producto.stock <= 0}
+                        onClick={() => abrirVistaRapida(producto)}
+                        className="px-3 py-1.5 rounded-full bg-[#F7E6E1] text-[#C6736A] text-xs font-semibold hover:bg-[#C6736A] hover:text-white transition cursor-pointer disabled:opacity-40"
+                      >
+                        {producto.stock <= 0 ? "Agotado" : "Elegir"}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       </main>
       {productoVistaRapida && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#5E3A36]/20 backdrop-blur-xs">
-          <div className="bg-[#FDF8F6] rounded-3xl max-w-2xl w-full p-6 md:p-8 gold-ring-border shadow-xl relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#5E3A36]/20 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-[#FDF8F6] rounded-3xl max-w-2xl w-full p-6 md:p-8 gold-ring-border shadow-xl relative my-6">
             <button
               onClick={() => setProductoVistaRapida(null)}
               className="absolute top-5 right-5 p-2 rounded-full bg-white gold-ring-border text-[#9E7B74] hover:text-[#C6736A] cursor-pointer"
@@ -469,9 +540,9 @@ export default function JadaraStore() {
               <div
                 className={`h-72 rounded-2xl ${productoVistaRapida.tonoFondo} flex flex-col items-center justify-center relative gold-ring-border overflow-hidden`}
               >
-                {productoVistaRapida.imagenUrl ? (
+                {colorModalActivo?.imagenUrl || productoVistaRapida.imagenUrl ? (
                   <img
-                    src={productoVistaRapida.imagenUrl}
+                    src={colorModalActivo?.imagenUrl || productoVistaRapida.imagenUrl || ""}
                     alt={productoVistaRapida.nombre}
                     style={{ transform: `rotateY(${rotacion3D}deg)` }}
                     className="w-full h-full object-cover transition-transform duration-500"
@@ -487,6 +558,11 @@ export default function JadaraStore() {
                     <span className="text-sm font-serif text-[#5E3A36]">
                       {productoVistaRapida.nombre}
                     </span>
+                    {colorModalActivo && (
+                      <span className="block text-xs text-[#C6736A] mt-1 font-medium">
+                        Color: {colorModalActivo.nombre}
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -503,38 +579,71 @@ export default function JadaraStore() {
                 <span className="text-xs uppercase tracking-widest text-[#C89B54] font-semibold">
                   {productoVistaRapida.categoria}
                 </span>
-                <h3 className="text-2xl font-serif text-[#5E3A36] mt-1 mb-2">
+                <h3 className="text-2xl font-serif text-[#5E3A36] mt-1 mb-1">
                   {productoVistaRapida.nombre}
                 </h3>
                 <p className="text-xl font-semibold text-[#C6736A] mb-3">
                   ${productoVistaRapida.precio.toLocaleString("es-CO")}
                 </p>
-                <p className="text-xs text-[#9E7B74] leading-relaxed mb-5">
+                <p className="text-xs text-[#9E7B74] leading-relaxed mb-4">
                   {productoVistaRapida.descripcion}
                 </p>
 
+                {productoVistaRapida.coloresFotos.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-[#5E3A36] mb-2">
+                      Color:{" "}
+                      <span className="text-[#C6736A]">
+                        {colorModalActivo?.nombre}
+                      </span>
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {productoVistaRapida.coloresFotos.map((col, idx) => (
+                        <button
+                          key={col.nombre + idx}
+                          type="button"
+                          onClick={() => setColorModalActivo(col)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition cursor-pointer ${
+                            colorModalActivo?.nombre === col.nombre
+                              ? "bg-[#C6736A] text-white"
+                              : "bg-white text-[#5E3A36] gold-ring-border"
+                          }`}
+                        >
+                          <span
+                            className="w-3.5 h-3.5 rounded-full border border-black/20"
+                            style={{ backgroundColor: col.hex }}
+                          />
+                          <span>{col.nombre}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-xs font-semibold text-[#5E3A36] mb-2">
-                  Selecciona variante:
+                  Selecciona talla disponible:
                 </p>
                 <div className="flex flex-wrap gap-2 mb-6">
-                  {productoVistaRapida.opciones.map((op) => (
+                  {productoVistaRapida.opciones.map((talla) => (
                     <button
-                      key={op}
-                      onClick={() => setOpcionActiva(op)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1 ${
-                        opcionActiva === op
+                      key={talla}
+                      onClick={() => setTallaActiva(talla)}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer flex items-center gap-1 ${
+                        tallaActiva === talla
                           ? "bg-[#C6736A] text-white"
                           : "bg-white text-[#5E3A36] gold-ring-border"
                       }`}
                     >
-                      {opcionActiva === op && <Check className="w-3 h-3" />}
-                      <span>{op}</span>
+                      {tallaActiva === talla && <Check className="w-3 h-3" />}
+                      <span>{talla}</span>
                     </button>
                   ))}
                 </div>
 
                 <button
-                  onClick={() => agregarAlCarrito(productoVistaRapida, opcionActiva)}
+                  onClick={() =>
+                    agregarAlCarrito(productoVistaRapida, tallaActiva, colorModalActivo)
+                  }
                   className="w-full py-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-sm font-medium shadow-xs hover:opacity-95 transition cursor-pointer"
                 >
                   Añadir al Bolso Jadara
@@ -703,7 +812,6 @@ export default function JadaraStore() {
         total={totalPrecio}
         alCompletarVenta={() => {
           setCarrito([]);
-          setCheckoutAbierto(false);
           cargarProductosReales();
         }}
       />

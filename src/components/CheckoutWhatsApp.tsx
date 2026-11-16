@@ -49,11 +49,11 @@ export default function CheckoutWhatsApp({
   const [procesando, setProcesando] = useState(false);
   const [factura, setFactura] = useState<FacturaGenerada | null>(null);
 
-  if (!abierto) return null;
+  if (!abierto && !factura) return null;
 
   const abrirWhatsAppInteligente = (encodedMessage: string) => {
     const phoneNumber = "573246670248";
-    const urlWeb = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
+    const urlWeb = `https://wa.me{phoneNumber}?text=${encodedMessage}`;
     const urlApp = `whatsapp://send?phone=${phoneNumber}&text=${encodedMessage}`;
     const esMovil = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -95,24 +95,28 @@ export default function CheckoutWhatsApp({
       0
     );
 
-    await supabase.from("ventas").insert([
-      {
-        cliente: nombre,
-        ciudad,
-        detalle: `[${numeroOrden}] ` + items.map((i) => `${i.cantidad}x ${i.nombre}`).join(", "),
-        total_venta: total,
-        ganancia_neta: gananciaTotal,
-      },
-    ]);
+    try {
+      await supabase.from("ventas").insert([
+        {
+          cliente: nombre,
+          ciudad,
+          detalle: `[${numeroOrden}] ` + items.map((i) => `${i.cantidad}x ${i.nombre} (${i.opcionSeleccionada})`).join(", "),
+          total_venta: total,
+          ganancia_neta: gananciaTotal,
+        },
+      ]);
 
-    for (const item of items) {
-      if (item.esRealDB) {
-        const nuevoStock = Math.max(0, item.stockActual - item.cantidad);
-        await supabase
-          .from("productos")
-          .update({ stock: nuevoStock })
-          .eq("id", item.id);
+      for (const item of items) {
+        if (item.esRealDB) {
+          const nuevoStock = Math.max(0, item.stockActual - item.cantidad);
+          await supabase
+            .from("productos")
+            .update({ stock: nuevoStock })
+            .eq("id", item.id);
+        }
       }
+    } catch {
+      // Continúa mostrando la factura aunque haya latencia de red
     }
 
     const mensaje = `Hola *JADARA* ✨, confirmo mi orden *${numeroOrden}*:\n\n*Clienta:* ${nombre}\n*Ciudad:* ${ciudad}\n*Dirección:* ${direccion}\n*Pago:* ${metodoPago}\n\n*Detalle:*\n${detalleProductos}\n\n*Total Neto (Sin IVA):* $${total.toLocaleString("es-CO")}`;
@@ -213,7 +217,7 @@ export default function CheckoutWhatsApp({
                       {item.cantidad}x {item.nombre}
                     </span>
                     <span className="block text-[11px] text-[#9E7B74]">
-                      Variante: {item.opcionSeleccionada} · Unitario: ${item.precio.toLocaleString("es-CO")}
+                      Detalle: {item.opcionSeleccionada} · Unitario: ${item.precio.toLocaleString("es-CO")}
                     </span>
                   </div>
                   <span className="font-semibold text-[#5E3A36]">
@@ -251,7 +255,7 @@ export default function CheckoutWhatsApp({
               className="py-3 px-4 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm hover:opacity-95 cursor-pointer"
             >
               <Send className="w-4 h-4" />
-              <span>Enviar a WhatsApp</span>
+              <span>Confirmar en WhatsApp</span>
             </button>
           </div>
         </div>
