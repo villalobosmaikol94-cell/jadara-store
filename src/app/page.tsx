@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Sparkles,
   ShoppingBag,
@@ -14,19 +14,26 @@ import {
   RotateCw,
   Check,
   Upload,
+  Lock,
 } from "lucide-react";
+import { supabase } from "../lib/supabase";
 import ProbadorAR from "../components/ProbadorAR";
 import CheckoutWhatsApp from "../components/CheckoutWhatsApp";
+import PanelAdminModal from "../components/PanelAdminModal";
 
 interface Producto {
   id: number;
   nombre: string;
   categoria: string;
   precio: number;
+  costo: number;
+  stock: number;
+  imagenUrl: string | null;
   badge: string;
   tonoFondo: string;
   descripcion: string;
   opciones: string[];
+  esRealDB: boolean;
 }
 
 interface ItemCarrito {
@@ -36,58 +43,76 @@ interface ItemCarrito {
 }
 
 const CATEGORIAS: string[] = ["Todo", "Belleza", "Carteras", "Tenis", "Ropa Dama"];
-
-const CATALOGO: Producto[] = [
+const CATALOGO_DEMO: Producto[] = [
   {
-    id: 1,
+    id: 101,
     nombre: "Sérum Pétalo Luminoso Vitamina C",
     categoria: "Belleza",
     precio: 125000,
+    costo: 65000,
+    stock: 10,
+    imagenUrl: null,
     badge: "Probador Facial AR",
     tonoFondo: "bg-[#F9EAE6]",
     descripcion:
       "Fórmula botánica iluminadora con extracto de rosa y vitamina C pura para un brillo natural.",
     opciones: ["30 ml · Iluminador", "50 ml · Efecto Seda"],
+    esRealDB: false,
   },
   {
-    id: 2,
+    id: 102,
     nombre: "Cartera Estructurada Aura Rose",
     categoria: "Carteras",
     precio: 280000,
+    costo: 150000,
+    stock: 6,
+    imagenUrl: null,
     badge: "Vista 3D 360°",
     tonoFondo: "bg-[#F6EDE7]",
     descripcion:
       "Acabado vegano premium con herrajes dorado champán y correa ajustable de lujo.",
     opciones: ["Rosa Pétalo", "Crema Alabastro", "Terracota Suave"],
+    esRealDB: false,
   },
   {
-    id: 3,
+    id: 103,
     nombre: "Tenis CloudWalk Champagne & Cream",
     categoria: "Tenis",
     precio: 340000,
+    costo: 190000,
+    stock: 8,
+    imagenUrl: null,
     badge: "Escáner Talla IA",
     tonoFondo: "bg-[#FAF2EE]",
     descripcion:
       "Suela ergonómica ultraligera diseñada para caminar con elegancia durante todo el día.",
     opciones: ["Talla 36", "Talla 37", "Talla 38", "Talla 39"],
+    esRealDB: false,
   },
   {
-    id: 4,
+    id: 104,
     nombre: "Vestido Seda Fluida Terracota Suave",
     categoria: "Ropa Dama",
     precio: 215000,
+    costo: 110000,
+    stock: 5,
+    imagenUrl: null,
     badge: "Estilista Virtual",
     tonoFondo: "bg-[#F5E6E3]",
     descripcion:
       "Caída fluida que estiliza la silueta con tela transpirable de tacto suave.",
     opciones: ["Talla S", "Talla M", "Talla L"],
+    esRealDB: false,
   },
 ];
 export default function JadaraStore() {
+  const [catalogo, setCatalogo] = useState<Producto[]>(CATALOGO_DEMO);
   const [categoriaActiva, setCategoriaActiva] = useState<string>("Todo");
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
   const [carritoAbierto, setCarritoAbierto] = useState<boolean>(false);
   const [checkoutAbierto, setCheckoutAbierto] = useState<boolean>(false);
+  const [adminAbierto, setAdminAbierto] = useState<boolean>(false);
+
   const [consultaIA, setConsultaIA] = useState<string>("");
   const [lookSugerido, setLookSugerido] = useState<Producto[] | null>(null);
 
@@ -100,10 +125,42 @@ export default function JadaraStore() {
   const [imagenSubida, setImagenSubida] = useState<string | null>(null);
   const inputFotoRef = useRef<HTMLInputElement | null>(null);
 
+  const cargarProductosReales = async () => {
+    const { data } = await supabase
+      .from("productos")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (data && data.length > 0) {
+      const formateados: Producto[] = data.map((p) => ({
+        id: p.id,
+        nombre: p.nombre,
+        categoria: p.categoria,
+        precio: Number(p.precio_venta),
+        costo: Number(p.costo_compra),
+        stock: Number(p.stock),
+        imagenUrl: p.imagen_url,
+        badge: p.stock > 0 ? `${p.stock} disponibles` : "Agotado",
+        tonoFondo: "bg-[#F9EAE6]",
+        descripcion:
+          p.descripcion || "Pieza exclusiva Jadara diseñada con propósito y estilo.",
+        opciones: p.opciones && p.opciones.length > 0 ? p.opciones : ["Única"],
+        esRealDB: true,
+      }));
+      setCatalogo(formateados);
+    } else {
+      setCatalogo(CATALOGO_DEMO);
+    }
+  };
+
+  useEffect(() => {
+    cargarProductosReales();
+  }, []);
+
   const productosFiltrados =
     categoriaActiva === "Todo"
-      ? CATALOGO
-      : CATALOGO.filter((p) => p.categoria === categoriaActiva);
+      ? catalogo
+      : catalogo.filter((p) => p.categoria === categoriaActiva);
 
   const abrirVistaRapida = (producto: Producto) => {
     setProductoVistaRapida(producto);
@@ -112,6 +169,7 @@ export default function JadaraStore() {
   };
 
   const agregarAlCarrito = (producto: Producto, opcion?: string) => {
+    if (producto.stock <= 0) return;
     const elegida = opcion || (producto.opciones.at(0) ?? "Única");
     setCarrito((prev) => {
       const existe = prev.find(
@@ -128,11 +186,6 @@ export default function JadaraStore() {
     });
     setProductoVistaRapida(null);
     setCarritoAbierto(true);
-  };
-
-  const agregarLookCompleto = () => {
-    if (!lookSugerido) return;
-    lookSugerido.forEach((prod) => agregarAlCarrito(prod));
   };
 
   const cambiarCantidad = (id: number, opcion: string, delta: number) => {
@@ -156,7 +209,7 @@ export default function JadaraStore() {
   const ejecutarEstilistaIA = (e: React.FormEvent) => {
     e.preventDefault();
     if (!consultaIA.trim()) return;
-    setLookSugerido([CATALOGO[3], CATALOGO[2], CATALOGO[1]]);
+    setLookSugerido(catalogo.slice(0, 3));
   };
 
   const manejarFotoSubida = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -167,19 +220,19 @@ export default function JadaraStore() {
   };
   return (
     <div className="min-h-screen bg-[#FDF8F6] text-[#5E3A36]">
-      <header className="sticky top-0 z-40 glass-jadara px-6 py-3">
+      <header className="sticky top-0 z-40 glass-jadara px-4 sm:px-6 py-3">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
               src="/images/jadara.png"
               alt="Logo Jadara"
-              className="w-12 h-12 rounded-full object-cover gold-ring-border shadow-xs"
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full object-cover gold-ring-border shadow-xs"
             />
             <div>
-              <span className="block text-xl font-serif tracking-[0.22em] text-[#C6736A] font-semibold">
+              <span className="block text-lg sm:text-xl font-serif tracking-[0.22em] text-[#C6736A] font-semibold">
                 JADARA
               </span>
-              <span className="block text-[10px] tracking-[0.18em] uppercase text-[#9E7B74]">
+              <span className="block text-[9px] sm:text-[10px] tracking-[0.18em] uppercase text-[#9E7B74]">
                 Belleza con propósito
               </span>
             </div>
@@ -201,7 +254,16 @@ export default function JadaraStore() {
             ))}
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={() => setAdminAbierto(true)}
+              title="Jadara Studio (Admin)"
+              className="px-3 py-2 rounded-full bg-white gold-ring-border hover:bg-[#F7E6E1] transition flex items-center gap-1.5 text-xs font-medium text-[#9E7B74] hover:text-[#C6736A] cursor-pointer"
+            >
+              <Lock className="w-3.5 h-3.5 text-[#C89B54]" />
+              <span className="hidden sm:inline">Studio</span>
+            </button>
+
             <button
               onClick={() => setBusquedaVisualAbierta(true)}
               title="Buscar por foto con IA"
@@ -209,6 +271,7 @@ export default function JadaraStore() {
             >
               <Camera className="w-4 h-4 text-[#C6736A]" />
             </button>
+
             <button
               onClick={() => setCarritoAbierto(true)}
               className="relative p-2.5 rounded-full bg-white gold-ring-border hover:bg-[#F7E6E1] transition cursor-pointer"
@@ -222,8 +285,8 @@ export default function JadaraStore() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 pt-10 pb-24">
-        <section className="rounded-3xl bg-gradient-to-br from-white via-[#FDF5F2] to-[#F7E6E1] p-8 md:p-14 gold-ring-border shadow-xs mb-16">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-8 sm:pt-10 pb-24">
+        <section className="rounded-3xl bg-gradient-to-br from-white via-[#FDF5F2] to-[#F7E6E1] p-7 md:p-14 gold-ring-border shadow-xs mb-12 sm:mb-16">
           <div className="grid md:grid-cols-12 gap-8 items-center">
             <div className="md:col-span-7">
               <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/90 text-xs font-medium text-[#C89B54] gold-ring-border mb-6">
@@ -231,11 +294,11 @@ export default function JadaraStore() {
                 <span>Tecnología de Moda & Belleza 2026</span>
               </div>
 
-              <h1 className="text-4xl md:text-5xl font-serif text-[#5E3A36] leading-tight mb-4">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif text-[#5E3A36] leading-tight mb-4">
                 Tu estilo florece con{" "}
                 <span className="text-[#C6736A] italic">inteligencia y luz.</span>
               </h1>
-              <p className="text-[#9E7B74] text-base md:text-lg mb-8 max-w-xl">
+              <p className="text-[#9E7B74] text-sm sm:text-base md:text-lg mb-8 max-w-xl">
                 Explora cosmética, carteras, tenis y moda femenina con probador virtual en cámara y asesoría inteligente.
               </p>
 
@@ -248,12 +311,12 @@ export default function JadaraStore() {
                   type="text"
                   value={consultaIA}
                   onChange={(e) => setConsultaIA(e.target.value)}
-                  placeholder="Pídele a la IA: Arma un outfit casual con tenis..."
+                  placeholder="Pídele a la IA: Arma un outfit casual..."
                   className="w-full px-3 py-2 text-sm bg-transparent focus:outline-none text-[#5E3A36]"
                 />
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-sm font-medium hover:opacity-95 transition flex items-center gap-2 shrink-0 cursor-pointer"
+                  className="px-5 py-2.5 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs sm:text-sm font-medium hover:opacity-95 transition flex items-center gap-1.5 shrink-0 cursor-pointer"
                 >
                   <span>Crear Look</span>
                   <ArrowRight className="w-4 h-4" />
@@ -263,7 +326,7 @@ export default function JadaraStore() {
               {lookSugerido && (
                 <div className="mt-4 p-4 rounded-2xl bg-white/95 gold-ring-border text-sm text-[#5E3A36] max-w-xl">
                   <p className="font-semibold text-[#C6736A] mb-2">
-                    Estilista Jadara IA armó este conjunto para ti:
+                    Estilista Jadara IA armó este conjunto:
                   </p>
                   <div className="flex flex-wrap gap-2 mb-3">
                     {lookSugerido.map((item) => (
@@ -276,7 +339,7 @@ export default function JadaraStore() {
                     ))}
                   </div>
                   <button
-                    onClick={agregarLookCompleto}
+                    onClick={() => lookSugerido.forEach((p) => agregarAlCarrito(p))}
                     className="px-4 py-1.5 rounded-full bg-[#C6736A] text-white text-xs font-medium hover:opacity-90 cursor-pointer"
                   >
                     + Añadir Look Completo al Bolso
@@ -286,7 +349,7 @@ export default function JadaraStore() {
             </div>
 
             <div className="md:col-span-5 flex justify-center">
-              <div className="w-64 h-64 md:w-72 md:h-72 rounded-full p-2 gold-ring-border bg-white/60 shadow-sm flex items-center justify-center">
+              <div className="w-56 h-56 sm:w-64 sm:h-64 md:w-72 md:h-72 rounded-full p-2 gold-ring-border bg-white/60 shadow-sm flex items-center justify-center">
                 <img
                   src="/images/jadara.png"
                   alt="Emblema Jadara"
@@ -297,9 +360,26 @@ export default function JadaraStore() {
           </div>
         </section>
         <section>
-          <h2 className="text-2xl font-serif text-[#5E3A36] mb-8">
-            Colección Exclusiva {categoriaActiva !== "Todo" && `· ${categoriaActiva}`}
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
+            <h2 className="text-2xl font-serif text-[#5E3A36]">
+              Colección Exclusiva {categoriaActiva !== "Todo" && `· ${categoriaActiva}`}
+            </h2>
+            <div className="flex flex-wrap gap-2 md:hidden">
+              {CATEGORIAS.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setCategoriaActiva(cat)}
+                  className={`px-3 py-1 rounded-full text-xs ${
+                    categoriaActiva === cat
+                      ? "bg-[#C6736A] text-white"
+                      : "bg-white text-[#9E7B74] gold-ring-border"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-7">
             {productosFiltrados.map((producto) => (
@@ -311,18 +391,26 @@ export default function JadaraStore() {
                   onClick={() => abrirVistaRapida(producto)}
                   className={`h-60 rounded-2xl ${producto.tonoFondo} mb-4 relative flex items-center justify-center overflow-hidden cursor-pointer`}
                 >
-                  <span className="text-xs text-[#9E7B74] tracking-widest uppercase">
-                    Foto {producto.categoria}
-                  </span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setProductoProbadorAR(producto);
-                    }}
-                    className="absolute top-3 left-3 px-3 py-1 rounded-full bg-white/95 text-[11px] font-medium text-[#C89B54] gold-ring-border hover:bg-[#C6736A] hover:text-white transition cursor-pointer"
+                  {producto.imagenUrl ? (
+                    <img
+                      src={producto.imagenUrl}
+                      alt={producto.nombre}
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                    />
+                  ) : (
+                    <span className="text-xs text-[#9E7B74] tracking-widest uppercase">
+                      Foto {producto.categoria}
+                    </span>
+                  )}
+
+                  <span
+                    className={`absolute top-3 left-3 px-3 py-1 rounded-full bg-white/95 text-[11px] font-medium gold-ring-border ${
+                      producto.stock <= 0 ? "text-red-500" : "text-[#C89B54]"
+                    }`}
                   >
                     {producto.badge}
-                  </button>
+                  </span>
+
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -354,10 +442,11 @@ export default function JadaraStore() {
                       Probar AR
                     </button>
                     <button
+                      disabled={producto.stock <= 0}
                       onClick={() => abrirVistaRapida(producto)}
-                      className="px-3 py-1.5 rounded-full bg-[#F7E6E1] text-[#C6736A] text-xs font-semibold hover:bg-[#C6736A] hover:text-white transition cursor-pointer"
+                      className="px-3 py-1.5 rounded-full bg-[#F7E6E1] text-[#C6736A] text-xs font-semibold hover:bg-[#C6736A] hover:text-white transition cursor-pointer disabled:opacity-40"
                     >
-                      Elegir
+                      {producto.stock <= 0 ? "Agotado" : "Elegir"}
                     </button>
                   </div>
                 </div>
@@ -366,7 +455,6 @@ export default function JadaraStore() {
           </div>
         </section>
       </main>
-
       {productoVistaRapida && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#5E3A36]/20 backdrop-blur-xs">
           <div className="bg-[#FDF8F6] rounded-3xl max-w-2xl w-full p-6 md:p-8 gold-ring-border shadow-xl relative">
@@ -379,19 +467,28 @@ export default function JadaraStore() {
 
             <div className="grid md:grid-cols-2 gap-6 items-center">
               <div
-                className={`h-72 rounded-2xl ${productoVistaRapida.tonoFondo} flex flex-col items-center justify-center relative gold-ring-border`}
+                className={`h-72 rounded-2xl ${productoVistaRapida.tonoFondo} flex flex-col items-center justify-center relative gold-ring-border overflow-hidden`}
               >
-                <div
-                  style={{ transform: `rotateY(${rotacion3D}deg)` }}
-                  className="transition-transform duration-500 text-center px-4"
-                >
-                  <span className="block text-xs uppercase tracking-widest text-[#C89B54] mb-1">
-                    Vista 360° ({rotacion3D}°)
-                  </span>
-                  <span className="text-sm font-serif text-[#5E3A36]">
-                    {productoVistaRapida.nombre}
-                  </span>
-                </div>
+                {productoVistaRapida.imagenUrl ? (
+                  <img
+                    src={productoVistaRapida.imagenUrl}
+                    alt={productoVistaRapida.nombre}
+                    style={{ transform: `rotateY(${rotacion3D}deg)` }}
+                    className="w-full h-full object-cover transition-transform duration-500"
+                  />
+                ) : (
+                  <div
+                    style={{ transform: `rotateY(${rotacion3D}deg)` }}
+                    className="transition-transform duration-500 text-center px-4"
+                  >
+                    <span className="block text-xs uppercase tracking-widest text-[#C89B54] mb-1">
+                      Vista 360° ({rotacion3D}°)
+                    </span>
+                    <span className="text-sm font-serif text-[#5E3A36]">
+                      {productoVistaRapida.nombre}
+                    </span>
+                  </div>
+                )}
 
                 <button
                   onClick={() => setRotacion3D((prev) => (prev + 90) % 360)}
@@ -494,7 +591,7 @@ export default function JadaraStore() {
                 />
                 <div className="p-3 rounded-2xl bg-white gold-ring-border text-xs text-[#5E3A36]">
                   <span className="font-semibold text-[#C6736A]">Coincidencia 96%: </span>
-                  Te recomendamos la <strong>Cartera Estructurada Aura Rose</strong> y los <strong>Tenis CloudWalk Champagne</strong>.
+                  Encuentra estilos similares en nuestra colección exclusiva.
                 </div>
               </div>
             )}
@@ -560,7 +657,6 @@ export default function JadaraStore() {
                 </div>
               )}
             </div>
-
             {carrito.length > 0 && (
               <div className="pt-4 border-t border-[#F7E6E1]">
                 <div className="flex justify-between text-base font-semibold mb-4">
@@ -595,13 +691,27 @@ export default function JadaraStore() {
         abierto={checkoutAbierto}
         alCerrar={() => setCheckoutAbierto(false)}
         items={carrito.map((item) => ({
+          id: item.producto.id,
           nombre: item.producto.nombre,
           opcionSeleccionada: item.opcionSeleccionada,
           cantidad: item.cantidad,
           precio: item.producto.precio,
+          costo: item.producto.costo,
+          stockActual: item.producto.stock,
+          esRealDB: item.producto.esRealDB,
         }))}
         total={totalPrecio}
-        numeroWhatsApp="573246670248"
+        alCompletarVenta={() => {
+          setCarrito([]);
+          setCheckoutAbierto(false);
+          cargarProductosReales();
+        }}
+      />
+
+      <PanelAdminModal
+        abierto={adminAbierto}
+        alCerrar={() => setAdminAbierto(false)}
+        alActualizarCatalogo={cargarProductosReales}
       />
     </div>
   );
