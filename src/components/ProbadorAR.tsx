@@ -54,7 +54,6 @@ const LABIO_INTERIOR: number[] = [
   81, 80, 191,
 ];
 
-// Elimina el fondo blanco/claro desde los bordes de la foto de la prenda (100% gratis en el navegador)
 function recortarFondoPrenda(img: HTMLImageElement): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   const w = img.naturalWidth || img.width;
@@ -68,7 +67,6 @@ function recortarFondoPrenda(img: HTMLImageElement): HTMLCanvasElement {
   try {
     const imgData = ctx.getImageData(0, 0, w, h);
     const data = imgData.data;
-    // Tomar el color de referencia de las esquinas superiores
     const refR = data[0] ?? 255;
     const refG = data[1] ?? 255;
     const refB = data[2] ?? 255;
@@ -78,14 +76,13 @@ function recortarFondoPrenda(img: HTMLImageElement): HTMLCanvasElement {
       const g = data[i + 1] ?? 0;
       const b = data[i + 2] ?? 0;
       const diff = Math.abs(r - refR) + Math.abs(g - refG) + Math.abs(b - refB);
-      // Si el píxel coincide con el fondo de la foto o es blanco estudio, se vuelve transparente
       if (diff < 65 || (r > 235 && g > 232 && b > 230)) {
         data[i + 3] = 0;
       }
     }
     ctx.putImageData(imgData, 0, 0);
   } catch {
-    // Si la imagen no permite edición directa, se conserva intacta
+    // Mantiene la imagen si no permite lectura directa
   }
   return canvas;
 }
@@ -147,63 +144,39 @@ export default function ProbadorAR({
 
       if (!fotoSubida) {
         try {
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error("Navegador sin soporte de cámara");
+          }
+
           streamActivo = await navigator.mediaDevices.getUserMedia({
             video: {
               facingMode: camaraFrontal ? "user" : "environment",
-              width: { ideal: 720 },
-              height: { ideal: 960 },
             },
             audio: false,
           });
+
           if (cancelado) return;
+
           if (videoRef.current) {
             videoRef.current.srcObject = streamActivo;
+            videoRef.current.setAttribute("playsinline", "true");
             await videoRef.current.play();
           }
         } catch {
           if (!cancelado) {
-            setErrorCamara("No se detectó cámara. Sube una foto tuya para probarte el producto.");
+            setErrorCamara(
+              "No pudimos abrir la cámara. Si estás dentro de Instagram o WhatsApp, abre el enlace en Chrome o Safari, o sube una foto tuya."
+            );
             return;
           }
         }
-      }
-
-      // Cargar motor gratuito de Google MediaPipe versión 0.10.32
-      try {
-        const vision = await FilesetResolver.forVisionTasks(
-          "https://jsdelivr.net"
-        );
-
-        if (esBelleza) {
-          faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-            baseOptions: {
-              modelAssetPath:
-                "https://googleapis.com",
-            },
-            runningMode: fotoSubida ? "IMAGE" : "VIDEO",
-            numFaces: 1,
-          });
-        } else {
-          poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-            baseOptions: {
-              modelAssetPath:
-                "https://googleapis.com",
-            },
-            runningMode: fotoSubida ? "IMAGE" : "VIDEO",
-            numPoses: 1,
-          });
-        }
-
-        if (!cancelado) setIaLista(true);
-      } catch {
-        // Continúa en modo espejo si el navegador bloquea WASM
       }
 
       const procesarCuadro = () => {
         if (cancelado) return;
         const video = videoRef.current;
         const canvas = canvasRef.current;
-        const listo = fotoSubida || (video && video.readyState >= 2);
+        const listo = fotoSubida || (video && video.readyState >= 2 && video.videoWidth > 0);
 
         if (canvas && listo) {
           const ctx = canvas.getContext("2d");
@@ -224,7 +197,6 @@ export default function ProbadorAR({
 
             const ahora = performance.now();
 
-            // 1. MAQUILLAJE EN TIEMPO REAL
             if (esBelleza && faceLandmarker) {
               const res = fotoSubida
                 ? faceLandmarker.detect(fotoSubida)
@@ -277,7 +249,6 @@ export default function ProbadorAR({
                 }
               }
             }
-            // 2. ROPA / CARTERAS / TENIS CON INCLINACIÓN CORPORAL EN TIEMPO REAL
             if (!esBelleza && prendaListaRef.current) {
               const prenda = prendaListaRef.current;
               let cuerpo = null;
@@ -316,7 +287,6 @@ export default function ProbadorAR({
                     altoP
                   );
                 } else if (hIzq && hDer) {
-                  // Calcular centro, ancho e inclinación real de los hombros de la clienta
                   const x1 = hIzq.x * w;
                   const y1 = hIzq.y * h;
                   const x2 = hDer.x * w;
@@ -353,6 +323,36 @@ export default function ProbadorAR({
       };
 
       procesarCuadro();
+
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://jsdelivr.net"
+        );
+
+        if (esBelleza) {
+          faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                "https://googleapis.com",
+            },
+            runningMode: fotoSubida ? "IMAGE" : "VIDEO",
+            numFaces: 1,
+          });
+        } else {
+          poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath:
+                "https://googleapis.com",
+            },
+            runningMode: fotoSubida ? "IMAGE" : "VIDEO",
+            numPoses: 1,
+          });
+        }
+
+        if (!cancelado) setIaLista(true);
+      } catch {
+        // Sigue en modo espejo si el navegador restringe WASM
+      }
     };
 
     iniciarEspejoGratuito();
@@ -417,7 +417,14 @@ export default function ProbadorAR({
         />
 
         <div className="relative h-80 sm:h-96 rounded-2xl overflow-hidden bg-[#F7E6E1] gold-ring-border flex items-center justify-center">
-          <video ref={videoRef} playsInline muted className="hidden" />
+          {/* Video activo en segundo plano sin display:none para que Safari/Chrome móvil no lo pausen */}
+          <video
+            ref={videoRef}
+            playsInline
+            autoPlay
+            muted
+            className="absolute w-1 h-1 opacity-0 pointer-events-none"
+          />
 
           {errorCamara && !fotoSubida ? (
             <div className="p-6 text-center space-y-3">
@@ -444,7 +451,7 @@ export default function ProbadorAR({
           {!errorCamara && !fotoCapturada && (
             <>
               <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-white/90 text-[10px] font-semibold text-[#5E3A36]">
-                {iaLista ? "IA Rastreo Activo ✓" : "Iniciando rastreo..."}
+                {iaLista ? "IA Rastreo Activo ✓" : "Espejo Activo"}
               </span>
 
               {!fotoSubida && (
@@ -584,7 +591,7 @@ export default function ProbadorAR({
                 onClick={capturarFoto}
                 className="py-2.5 px-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
               >
-                <Camera className="w-3.5 h-3.5" />
+                <Camera className="w-4 h-4" />
                 <span>Tomar Foto</span>
               </button>
             )}
