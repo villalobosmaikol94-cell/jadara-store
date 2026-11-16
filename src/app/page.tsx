@@ -47,16 +47,16 @@ const CATEGORIAS: string[] = ["Todo", "Belleza", "Carteras", "Tenis", "Ropa Dama
 const CATALOGO_DEMO: Producto[] = [
   {
     id: 101,
-    nombre: "Sérum Pétalo Luminoso Vitamina C",
+    nombre: "Sérum & Labial Pétalo Luminoso",
     categoria: "Belleza",
     precio: 125000,
     costo: 65000,
     stock: 10,
     imagenUrl: null,
-    badge: "Probador Facial AR",
+    badge: "Filtro Facial AR",
     tonoFondo: "bg-[#F9EAE6]",
     descripcion:
-      "Fórmula botánica iluminadora con extracto de rosa y vitamina C pura para un brillo natural.",
+      "Fórmula botánica iluminadora con extracto de rosa y tonos naturales para un brillo radiante.",
     opciones: ["30 ml", "50 ml"],
     coloresFotos: [],
     esRealDB: false,
@@ -89,7 +89,7 @@ const CATALOGO_DEMO: Producto[] = [
     costo: 190000,
     stock: 8,
     imagenUrl: null,
-    badge: "Escáner Talla IA",
+    badge: "Nueva Colección",
     tonoFondo: "bg-[#FAF2EE]",
     descripcion:
       "Suela ergonómica ultraligera diseñada para caminar con elegancia durante todo el día.",
@@ -108,7 +108,7 @@ const CATALOGO_DEMO: Producto[] = [
     costo: 110000,
     stock: 5,
     imagenUrl: null,
-    badge: "Estilista Virtual",
+    badge: "Edición Limitada",
     tonoFondo: "bg-[#F5E6E3]",
     descripcion:
       "Caída fluida que estiliza la silueta con tela transpirable de tacto suave.",
@@ -324,7 +324,7 @@ export default function JadaraStore() {
                 <span className="text-[#C6736A] italic">inteligencia y luz.</span>
               </h1>
               <p className="text-[#9E7B74] text-sm sm:text-base md:text-lg mb-8 max-w-xl">
-                Explora cosmética, carteras, tenis y moda femenina con probador virtual en cámara y asesoría inteligente.
+                Explora cosmética con probador facial AR en vivo, carteras, tenis y moda femenina diseñada con propósito.
               </p>
 
               <form
@@ -505,16 +505,18 @@ export default function JadaraStore() {
                       ${producto.precio.toLocaleString("es-CO")}
                     </span>
                     <div className="flex gap-1.5">
-                      <button
-                        onClick={() => setProductoProbadorAR(producto)}
-                        className="px-2.5 py-1.5 rounded-full bg-white text-[#C89B54] gold-ring-border text-xs font-medium hover:bg-[#FDF8F6] cursor-pointer"
-                      >
-                        Probar AR
-                      </button>
+                      {producto.categoria === "Belleza" && (
+                        <button
+                          onClick={() => setProductoProbadorAR(producto)}
+                          className="px-2.5 py-1.5 rounded-full bg-white text-[#C89B54] gold-ring-border text-xs font-medium hover:bg-[#FDF8F6] cursor-pointer"
+                        >
+                          Probar AR
+                        </button>
+                      )}
                       <button
                         disabled={producto.stock <= 0}
                         onClick={() => abrirVistaRapida(producto)}
-                        className="px-3 py-1.5 rounded-full bg-[#F7E6E1] text-[#C6736A] text-xs font-semibold hover:bg-[#C6736A] hover:text-white transition cursor-pointer disabled:opacity-40"
+                        className="px-3.5 py-1.5 rounded-full bg-[#F7E6E1] text-[#C6736A] text-xs font-semibold hover:bg-[#C6736A] hover:text-white transition cursor-pointer disabled:opacity-40"
                       >
                         {producto.stock <= 0 ? "Agotado" : "Elegir"}
                       </button>
@@ -789,20 +791,11 @@ export default function JadaraStore() {
         </div>
       )}
 
-            <ProbadorAR
+      <ProbadorAR
         abierto={Boolean(productoProbadorAR)}
         alCerrar={() => setProductoProbadorAR(null)}
         nombreProducto={productoProbadorAR?.nombre ?? ""}
-        categoria={productoProbadorAR?.categoria ?? ""}
-        imagenProducto={
-          productoProbadorAR
-            ? productoProbadorAR.coloresFotos.at(
-                colorTarjetaActivo[productoProbadorAR.id] ?? 0
-              )?.imagenUrl || productoProbadorAR.imagenUrl
-            : null
-        }
       />
-
 
       <CheckoutWhatsApp
         abierto={checkoutAbierto}
