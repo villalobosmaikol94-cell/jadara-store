@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   X,
+  RotateCcw,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
@@ -42,7 +43,6 @@ interface PanelProps {
 }
 
 const PIN_ACCESO = "2026";
-
 export default function PanelAdminModal({
   abierto,
   alCerrar,
@@ -166,6 +166,17 @@ export default function PanelAdminModal({
     alActualizarCatalogo();
   };
 
+  const eliminarVenta = async (id: number) => {
+    if (!confirm("¿Eliminar este registro de venta?")) return;
+    await supabase.from("ventas").delete().eq("id", id);
+    cargarDatos();
+  };
+
+  const resetearFinanzas = async () => {
+    if (!confirm("¿Seguro que deseas resetear TODAS las finanzas y borrar el historial a $0?")) return;
+    await supabase.from("ventas").delete().neq("id", 0);
+    cargarDatos();
+  };
   const inversionBodega = productos.reduce(
     (acc, p) => acc + Number(p.costo_compra) * Number(p.stock),
     0
@@ -218,6 +229,7 @@ export default function PanelAdminModal({
       </div>
     );
   }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-[#5E3A36]/25 backdrop-blur-xs">
       <div className="bg-[#FDF8F6] rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-5 sm:p-7 gold-ring-border shadow-2xl relative">
@@ -291,6 +303,7 @@ export default function PanelAdminModal({
                 className="hidden"
               />
             </label>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <input
                 type="text"
@@ -422,6 +435,21 @@ export default function PanelAdminModal({
 
         {pestana === "contabilidad" && (
           <div className="space-y-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-[#5E3A36]">
+                Resumen Financiero en Vivo
+              </span>
+              {ventas.length > 0 && (
+                <button
+                  onClick={resetearFinanzas}
+                  className="px-3 py-1.5 rounded-full bg-red-50 text-red-600 border border-red-200 text-xs font-semibold hover:bg-red-100 transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Resetear Finanzas a $0</span>
+                </button>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="bg-white p-3.5 rounded-2xl gold-ring-border">
                 <span className="text-[11px] text-[#9E7B74] block">Costo Bodega</span>
@@ -454,28 +482,43 @@ export default function PanelAdminModal({
                 <DollarSign className="w-4 h-4 text-[#C89B54]" />
                 <span>Ventas Registradas</span>
               </h4>
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {ventas.map((v) => (
-                  <div
-                    key={v.id}
-                    className="p-2.5 rounded-xl bg-[#FDF8F6] gold-ring-border flex justify-between items-center text-xs"
-                  >
-                    <div>
-                      <span className="font-semibold">{v.cliente}</span>
-                      <span className="text-[#9E7B74]"> · {v.ciudad}</span>
-                      <p className="text-[11px] text-[#9E7B74]">{v.detalle}</p>
+              {ventas.length === 0 ? (
+                <p className="text-xs text-[#9E7B74] text-center py-4">
+                  No hay ventas registradas en este periodo.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {ventas.map((v) => (
+                    <div
+                      key={v.id}
+                      className="p-2.5 rounded-xl bg-[#FDF8F6] gold-ring-border flex justify-between items-center text-xs gap-2"
+                    >
+                      <div>
+                        <span className="font-semibold">{v.cliente}</span>
+                        <span className="text-[#9E7B74]"> · {v.ciudad}</span>
+                        <p className="text-[11px] text-[#9E7B74]">{v.detalle}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <span className="block font-bold text-[#C6736A]">
+                            ${Number(v.total_venta).toLocaleString("es-CO")}
+                          </span>
+                          <span className="text-[10px] text-emerald-700 font-semibold">
+                            +${Number(v.ganancia_neta).toLocaleString("es-CO")}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => eliminarVenta(v.id)}
+                          title="Eliminar esta venta"
+                          className="p-1.5 text-[#9E7B74] hover:text-red-600 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className="block font-bold text-[#C6736A]">
-                        ${Number(v.total_venta).toLocaleString("es-CO")}
-                      </span>
-                      <span className="text-[10px] text-emerald-700 font-semibold">
-                        +${Number(v.ganancia_neta).toLocaleString("es-CO")}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
