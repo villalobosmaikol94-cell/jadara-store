@@ -32,17 +32,17 @@ interface TonoCosmetico {
 
 const TONOS_LABIAL: TonoCosmetico[] = [
   { nombre: "Natural", color: "transparent", opacidad: 0 },
-  { nombre: "Rosa Pétalo", color: "#C94A6A", opacidad: 0.55 },
-  { nombre: "Terracota Jadara", color: "#A83C2E", opacidad: 0.6 },
-  { nombre: "Vino Pasión", color: "#6E142C", opacidad: 0.65 },
-  { nombre: "Nude Caramelo", color: "#A6634E", opacidad: 0.55 },
+  { nombre: "Rosa Pétalo", color: "#C94A6A", opacidad: 0.6 },
+  { nombre: "Terracota Jadara", color: "#A83C2E", opacidad: 0.65 },
+  { nombre: "Vino Pasión", color: "#6E142C", opacidad: 0.7 },
+  { nombre: "Nude Caramelo", color: "#A6634E", opacidad: 0.6 },
 ];
 
 const TONOS_RUBOR: TonoCosmetico[] = [
   { nombre: "Sin Rubor", color: "transparent", opacidad: 0 },
-  { nombre: "Durazno Sol", color: "#E07A5F", opacidad: 0.35 },
-  { nombre: "Rosa Fresco", color: "#D96B8A", opacidad: 0.35 },
-  { nombre: "Bronce Dorado", color: "#B87A44", opacidad: 0.32 },
+  { nombre: "Durazno Sol", color: "#E07A5F", opacidad: 0.4 },
+  { nombre: "Rosa Fresco", color: "#D96B8A", opacidad: 0.4 },
+  { nombre: "Bronce Dorado", color: "#B87A44", opacidad: 0.35 },
 ];
 const LABIO_EXTERIOR: number[] = [
   61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37,
@@ -54,32 +54,40 @@ const LABIO_INTERIOR: number[] = [
   81, 80, 191,
 ];
 
-// Función para recortar automáticamente el fondo blanco/claro de la foto de la prenda
-function crearPrendaSinFondo(img: HTMLImageElement): HTMLCanvasElement {
-  const tempCanvas = document.createElement("canvas");
-  tempCanvas.width = img.naturalWidth || img.width;
-  tempCanvas.height = img.naturalHeight || img.height;
-  const tCtx = tempCanvas.getContext("2d");
-  if (!tCtx) return tempCanvas;
+// Elimina el fondo blanco/claro desde los bordes de la foto de la prenda (100% gratis en el navegador)
+function recortarFondoPrenda(img: HTMLImageElement): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
 
-  tCtx.drawImage(img, 0, 0);
+  ctx.drawImage(img, 0, 0);
   try {
-    const imgData = tCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+    const imgData = ctx.getImageData(0, 0, w, h);
     const data = imgData.data;
+    // Tomar el color de referencia de las esquinas superiores
+    const refR = data[0] ?? 255;
+    const refG = data[1] ?? 255;
+    const refB = data[2] ?? 255;
+
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i] ?? 0;
       const g = data[i + 1] ?? 0;
       const b = data[i + 2] ?? 0;
-      // Si el píxel es casi blanco o crema muy claro de estudio, lo vuelve transparente
-      if (r > 232 && g > 228 && b > 225) {
+      const diff = Math.abs(r - refR) + Math.abs(g - refG) + Math.abs(b - refB);
+      // Si el píxel coincide con el fondo de la foto o es blanco estudio, se vuelve transparente
+      if (diff < 65 || (r > 235 && g > 232 && b > 230)) {
         data[i + 3] = 0;
       }
     }
-    tCtx.putImageData(imgData, 0, 0);
+    ctx.putImageData(imgData, 0, 0);
   } catch {
-    // Si la imagen externa no permite lectura de píxeles, la deja intacta
+    // Si la imagen no permite edición directa, se conserva intacta
   }
-  return tempCanvas;
+  return canvas;
 }
 export default function ProbadorAR({
   abierto,
@@ -90,20 +98,20 @@ export default function ProbadorAR({
 }: ProbadorProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const prendaRecortadaRef = useRef<HTMLCanvasElement | HTMLImageElement | null>(null);
+  const prendaListaRef = useRef<HTMLCanvasElement | HTMLImageElement | null>(null);
   const inputFotoRef = useRef<HTMLInputElement | null>(null);
 
   const [camaraFrontal, setCamaraFrontal] = useState<boolean>(true);
-  const [estadoIA, setEstadoIA] = useState<"calibrando" | "activa" | "asistido">("calibrando");
+  const [iaLista, setIaLista] = useState<boolean>(false);
   const [errorCamara, setErrorCamara] = useState<string | null>(null);
-  const [fotoPropia, setFotoPropia] = useState<HTMLImageElement | null>(null);
+  const [fotoSubida, setFotoSubida] = useState<HTMLImageElement | null>(null);
   const [fotoCapturada, setFotoCapturada] = useState<string | null>(null);
 
   const [labialActivo, setLabialActivo] = useState<TonoCosmetico>(
-    TONOS_LABIAL.at(1) ?? { nombre: "Rosa Pétalo", color: "#C94A6A", opacidad: 0.55 }
+    TONOS_LABIAL.at(1) ?? { nombre: "Rosa Pétalo", color: "#C94A6A", opacidad: 0.6 }
   );
   const [ruborActivo, setRuborActivo] = useState<TonoCosmetico>(
-    TONOS_RUBOR.at(1) ?? { nombre: "Durazno Sol", color: "#E07A5F", opacidad: 0.35 }
+    TONOS_RUBOR.at(1) ?? { nombre: "Durazno Sol", color: "#E07A5F", opacidad: 0.4 }
   );
   const [ajusteAltura, setAjusteAltura] = useState<number>(0);
   const [ajusteAncho, setAjusteAncho] = useState<number>(1.35);
@@ -112,17 +120,16 @@ export default function ProbadorAR({
   const esCartera = categoria.toLowerCase().includes("cartera");
   const esTenis = categoria.toLowerCase().includes("tenis");
 
-  // Preparar la imagen del producto recortando su fondo
   useEffect(() => {
     if (!imagenProducto) {
-      prendaRecortadaRef.current = null;
+      prendaListaRef.current = null;
       return;
     }
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.src = imagenProducto;
     img.onload = () => {
-      prendaRecortadaRef.current = crearPrendaSinFondo(img);
+      prendaListaRef.current = recortarFondoPrenda(img);
     };
   }, [imagenProducto]);
   useEffect(() => {
@@ -134,12 +141,11 @@ export default function ProbadorAR({
     let poseLandmarker: PoseLandmarker | null = null;
     let cancelado = false;
 
-    const iniciarEspejoInstantaneo = async () => {
+    const iniciarEspejoGratuito = async () => {
       setErrorCamara(null);
-      setEstadoIA("calibrando");
+      setIaLista(false);
 
-      // 1. Encender la cámara DE INMEDIATO sin esperar a que descargue la IA
-      if (!fotoPropia) {
+      if (!fotoSubida) {
         try {
           streamActivo = await navigator.mediaDevices.getUserMedia({
             video: {
@@ -156,19 +162,16 @@ export default function ProbadorAR({
           }
         } catch {
           if (!cancelado) {
-            setErrorCamara("No se detectó cámara. Sube una foto tuya para probarte el look.");
+            setErrorCamara("No se detectó cámara. Sube una foto tuya para probarte el producto.");
             return;
           }
         }
       }
 
-      // Arrancar el renderizado del espejo de inmediato
-      renderizarBucle();
-
-      // 2. Cargar la Inteligencia Artificial en segundo plano (con respaldo automático)
+      // Cargar motor gratuito de Google MediaPipe versión 0.10.32
       try {
         const vision = await FilesetResolver.forVisionTasks(
-          "https://unpkg.com"
+          "https://jsdelivr.net"
         );
 
         if (esBelleza) {
@@ -177,7 +180,7 @@ export default function ProbadorAR({
               modelAssetPath:
                 "https://googleapis.com",
             },
-            runningMode: fotoPropia ? "IMAGE" : "VIDEO",
+            runningMode: fotoSubida ? "IMAGE" : "VIDEO",
             numFaces: 1,
           });
         } else {
@@ -186,193 +189,210 @@ export default function ProbadorAR({
               modelAssetPath:
                 "https://googleapis.com",
             },
-            runningMode: fotoPropia ? "IMAGE" : "VIDEO",
+            runningMode: fotoSubida ? "IMAGE" : "VIDEO",
             numPoses: 1,
           });
         }
 
-        if (!cancelado) {
-          setEstadoIA("activa");
-        }
+        if (!cancelado) setIaLista(true);
       } catch {
-        // Si la red bloquea el modelo externo, activa modo asistido para nunca quedarse cargando
-        if (!cancelado) {
-          setEstadoIA("asistido");
-        }
+        // Continúa en modo espejo si el navegador bloquea WASM
       }
-    };
-    const renderizarBucle = () => {
-      if (cancelado) return;
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const fuenteLista = fotoPropia || (video && video.readyState >= 2);
 
-      if (canvas && fuenteLista) {
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          const ancho = fotoPropia ? fotoPropia.naturalWidth : video!.videoWidth;
-          const alto = fotoPropia ? fotoPropia.naturalHeight : video!.videoHeight;
-          canvas.width = ancho;
-          canvas.height = alto;
+      const procesarCuadro = () => {
+        if (cancelado) return;
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        const listo = fotoSubida || (video && video.readyState >= 2);
 
-          ctx.save();
-          if (camaraFrontal && !fotoPropia) {
-            ctx.translate(ancho, 0);
-            ctx.scale(-1, 1);
-          }
+        if (canvas && listo) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            const w = fotoSubida ? fotoSubida.naturalWidth : video!.videoWidth;
+            const h = fotoSubida ? fotoSubida.naturalHeight : video!.videoHeight;
+            canvas.width = w;
+            canvas.height = h;
 
-          if (fotoPropia) {
-            ctx.drawImage(fotoPropia, 0, 0, ancho, alto);
-          } else if (video) {
-            ctx.drawImage(video, 0, 0, ancho, alto);
-          }
-
-          const ahora = performance.now();
-
-          // RASTREO FACIAL (MAQUILLAJE)
-          if (esBelleza) {
-            let rostro = null;
-            if (faceLandmarker) {
-              const res = fotoPropia
-                ? faceLandmarker.detect(fotoPropia)
-                : faceLandmarker.detectForVideo(video!, ahora);
-              rostro = res.faceLandmarks.at(0) ?? null;
+            ctx.save();
+            if (camaraFrontal && !fotoSubida) {
+              ctx.translate(w, 0);
+              ctx.scale(-1, 1);
             }
 
-            if (rostro) {
-              if (ruborActivo.opacidad > 0) {
-                const mejillaIzq = rostro.at(205);
-                const mejillaDer = rostro.at(425);
-                if (mejillaIzq && mejillaDer) {
+            if (fotoSubida) ctx.drawImage(fotoSubida, 0, 0, w, h);
+            else if (video) ctx.drawImage(video, 0, 0, w, h);
+
+            const ahora = performance.now();
+
+            // 1. MAQUILLAJE EN TIEMPO REAL
+            if (esBelleza && faceLandmarker) {
+              const res = fotoSubida
+                ? faceLandmarker.detect(fotoSubida)
+                : faceLandmarker.detectForVideo(video!, ahora);
+              const rostro = res.faceLandmarks.at(0);
+
+              if (rostro) {
+                if (ruborActivo.opacidad > 0) {
+                  const mIzq = rostro.at(205);
+                  const mDer = rostro.at(425);
+                  if (mIzq && mDer) {
+                    ctx.save();
+                    ctx.globalCompositeOperation = "multiply";
+                    ctx.globalAlpha = ruborActivo.opacidad;
+                    ctx.filter = "blur(16px)";
+                    ctx.fillStyle = ruborActivo.color;
+                    const radio = w * 0.06;
+                    ctx.beginPath();
+                    ctx.arc(mIzq.x * w, mIzq.y * h, radio, 0, Math.PI * 2);
+                    ctx.arc(mDer.x * w, mDer.y * h, radio, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                  }
+                }
+
+                if (labialActivo.opacidad > 0) {
                   ctx.save();
                   ctx.globalCompositeOperation = "multiply";
-                  ctx.globalAlpha = ruborActivo.opacidad;
-                  ctx.filter = "blur(18px)";
-                  ctx.fillStyle = ruborActivo.color;
-                  const radio = ancho * 0.065;
+                  ctx.globalAlpha = labialActivo.opacidad;
+                  ctx.filter = "blur(1.5px)";
+                  ctx.fillStyle = labialActivo.color;
                   ctx.beginPath();
-                  ctx.arc(mejillaIzq.x * ancho, mejillaIzq.y * alto, radio, 0, Math.PI * 2);
-                  ctx.arc(mejillaDer.x * ancho, mejillaDer.y * alto, radio, 0, Math.PI * 2);
-                  ctx.fill();
+                  LABIO_EXTERIOR.forEach((idx, i) => {
+                    const pt = rostro.at(idx);
+                    if (!pt) return;
+                    if (i === 0) ctx.moveTo(pt.x * w, pt.y * h);
+                    else ctx.lineTo(pt.x * w, pt.y * h);
+                  });
+                  ctx.closePath();
+
+                  LABIO_INTERIOR.forEach((idx, i) => {
+                    const pt = rostro.at(idx);
+                    if (!pt) return;
+                    if (i === 0) ctx.moveTo(pt.x * w, pt.y * h);
+                    else ctx.lineTo(pt.x * w, pt.y * h);
+                  });
+                  ctx.closePath();
+                  ctx.fill("evenodd");
                   ctx.restore();
                 }
               }
+            }
+            // 2. ROPA / CARTERAS / TENIS CON INCLINACIÓN CORPORAL EN TIEMPO REAL
+            if (!esBelleza && prendaListaRef.current) {
+              const prenda = prendaListaRef.current;
+              let cuerpo = null;
 
-              if (labialActivo.opacidad > 0) {
-                ctx.save();
-                ctx.globalCompositeOperation = "multiply";
-                ctx.globalAlpha = labialActivo.opacidad;
-                ctx.filter = "blur(2px)";
-                ctx.fillStyle = labialActivo.color;
-                ctx.beginPath();
-                LABIO_EXTERIOR.forEach((idx: number, i: number) => {
-                  const pt = rostro?.at(idx);
-                  if (!pt) return;
-                  if (i === 0) ctx.moveTo(pt.x * ancho, pt.y * alto);
-                  else ctx.lineTo(pt.x * ancho, pt.y * alto);
-                });
-                ctx.closePath();
-                LABIO_INTERIOR.forEach((idx: number, i: number) => {
-                  const pt = rostro?.at(idx);
-                  if (!pt) return;
-                  if (i === 0) ctx.moveTo(pt.x * ancho, pt.y * alto);
-                  else ctx.lineTo(pt.x * ancho, pt.y * alto);
-                });
-                ctx.closePath();
-                ctx.fill("evenodd");
-                ctx.restore();
+              if (poseLandmarker) {
+                const poses = fotoSubida
+                  ? poseLandmarker.detect(fotoSubida)
+                  : poseLandmarker.detectForVideo(video!, ahora);
+                cuerpo = poses.landmarks.at(0) ?? null;
+              }
+
+              if (cuerpo) {
+                const hIzq = cuerpo.at(11);
+                const hDer = cuerpo.at(12);
+                const munecaDer = cuerpo.at(16);
+                const tobilloDer = cuerpo.at(28);
+
+                if (esCartera && munecaDer) {
+                  const anchoP = w * 0.28 * ajusteAncho;
+                  const altoP = anchoP * (prenda.height / prenda.width);
+                  ctx.drawImage(
+                    prenda,
+                    munecaDer.x * w - anchoP / 2,
+                    munecaDer.y * h + ajusteAltura,
+                    anchoP,
+                    altoP
+                  );
+                } else if (esTenis && tobilloDer) {
+                  const anchoP = w * 0.22 * ajusteAncho;
+                  const altoP = anchoP * (prenda.height / prenda.width);
+                  ctx.drawImage(
+                    prenda,
+                    tobilloDer.x * w - anchoP / 2,
+                    tobilloDer.y * h - altoP * 0.3 + ajusteAltura,
+                    anchoP,
+                    altoP
+                  );
+                } else if (hIzq && hDer) {
+                  // Calcular centro, ancho e inclinación real de los hombros de la clienta
+                  const x1 = hIzq.x * w;
+                  const y1 = hIzq.y * h;
+                  const x2 = hDer.x * w;
+                  const y2 = hDer.y * h;
+
+                  const centroX = (x1 + x2) / 2;
+                  const topY = Math.min(y1, y2) - 18 + ajusteAltura;
+                  const distanciaHombros = Math.hypot(x2 - x1, y2 - y1);
+                  const angulo = Math.atan2(y1 - y2, x1 - x2);
+
+                  const anchoP = Math.max(distanciaHombros * ajusteAncho, w * 0.36);
+                  const altoP = anchoP * (prenda.height / prenda.width);
+
+                  ctx.save();
+                  ctx.translate(centroX, topY + altoP * 0.2);
+                  ctx.rotate(angulo);
+                  ctx.drawImage(prenda, -anchoP / 2, -altoP * 0.2, anchoP, altoP);
+                  ctx.restore();
+                }
+              } else {
+                const anchoP = w * 0.48 * (ajusteAncho / 1.35);
+                const altoP = anchoP * (prenda.height / prenda.width);
+                ctx.drawImage(prenda, w / 2 - anchoP / 2, h * 0.3 + ajusteAltura, anchoP, altoP);
               }
             }
+
+            ctx.restore();
           }
-          // RASTREO CORPORAL (ROPA, CARTERAS, TENIS)
-          if (!esBelleza && prendaRecortadaRef.current) {
-            const prenda = prendaRecortadaRef.current;
-            let cuerpo = null;
-
-            if (poseLandmarker) {
-              const poses = fotoPropia
-                ? poseLandmarker.detect(fotoPropia)
-                : poseLandmarker.detectForVideo(video!, ahora);
-              cuerpo = poses.landmarks.at(0) ?? null;
-            }
-
-            if (cuerpo) {
-              const hombroIzq = cuerpo.at(11);
-              const hombroDer = cuerpo.at(12);
-              const munecaDer = cuerpo.at(16);
-              const tobilloDer = cuerpo.at(28);
-
-              if (esCartera && munecaDer) {
-                const w = ancho * 0.28 * ajusteAncho;
-                const h = w * (prenda.height / prenda.width);
-                ctx.drawImage(prenda, munecaDer.x * ancho - w / 2, munecaDer.y * alto + ajusteAltura, w, h);
-              } else if (esTenis && tobilloDer) {
-                const w = ancho * 0.22 * ajusteAncho;
-                const h = w * (prenda.height / prenda.width);
-                ctx.drawImage(prenda, tobilloDer.x * ancho - w / 2, tobilloDer.y * alto - h * 0.3 + ajusteAltura, w, h);
-              } else if (hombroIzq && hombroDer) {
-                const centroX = ((hombroIzq.x + hombroDer.x) / 2) * ancho;
-                const topY = Math.min(hombroIzq.y, hombroDer.y) * alto - 20 + ajusteAltura;
-                const anchoHombros = Math.abs(hombroIzq.x - hombroDer.x) * ancho;
-                const w = Math.max(anchoHombros * ajusteAncho, ancho * 0.38);
-                const h = w * (prenda.height / prenda.width);
-                ctx.drawImage(prenda, centroX - w / 2, topY, w, h);
-              }
-            } else {
-              // Si aún no detecta cuerpo completo, ubica la prenda centrada en el torso
-              const w = ancho * 0.48 * (ajusteAncho / 1.35);
-              const h = w * (prenda.height / prenda.width);
-              ctx.drawImage(prenda, ancho / 2 - w / 2, alto * 0.32 + ajusteAltura, w, h);
-            }
-          }
-
-          ctx.restore();
         }
-      }
 
-      if (!fotoPropia) {
-        animationFrameId = requestAnimationFrame(renderizarBucle);
-      }
+        if (!fotoSubida) {
+          animationFrameId = requestAnimationFrame(procesarCuadro);
+        }
+      };
+
+      procesarCuadro();
     };
 
-    iniciarEspejoInstantaneo();
+    iniciarEspejoGratuito();
 
     return () => {
       cancelado = true;
       cancelAnimationFrame(animationFrameId);
       if (streamActivo) {
-        streamActivo.getTracks().forEach((track) => track.stop());
+        streamActivo.getTracks().forEach((t) => t.stop());
       }
       faceLandmarker?.close();
       poseLandmarker?.close();
     };
-  }, [abierto, camaraFrontal, esBelleza, esCartera, esTenis, labialActivo, ruborActivo, ajusteAltura, ajusteAncho, fotoPropia, fotoCapturada]);
+  }, [abierto, camaraFrontal, esBelleza, esCartera, esTenis, labialActivo, ruborActivo, ajusteAltura, ajusteAncho, fotoSubida, fotoCapturada]);
 
   if (!abierto) return null;
-
   const manejarFotoSubida = (e: React.ChangeEvent<HTMLInputElement>) => {
     const archivo = e.target.files?.item(0);
     if (archivo) {
       const img = new Image();
       img.src = URL.createObjectURL(archivo);
       img.onload = () => {
-        setFotoPropia(img);
+        setFotoSubida(img);
         setErrorCamara(null);
       };
     }
   };
 
-  const tomarFoto = () => {
+  const capturarFoto = () => {
     if (!canvasRef.current) return;
     setFotoCapturada(canvasRef.current.toDataURL("image/png"));
   };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#5E3A36]/30 backdrop-blur-xs overflow-y-auto">
       <div className="bg-[#FDF8F6] rounded-3xl max-w-lg w-full p-5 sm:p-6 gold-ring-border shadow-2xl relative my-4">
         <button
           onClick={() => {
             setFotoCapturada(null);
-            setFotoPropia(null);
+            setFotoSubida(null);
             alCerrar();
           }}
           className="absolute top-4 right-4 p-2 rounded-full bg-white gold-ring-border text-[#9E7B74] hover:text-[#C6736A] cursor-pointer z-20"
@@ -382,7 +402,7 @@ export default function ProbadorAR({
 
         <div className="flex items-center gap-2 text-xs font-medium text-[#C89B54] mb-0.5">
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Espejo Virtual Jadara · {categoria}</span>
+          <span>Espejo Virtual AR · {categoria}</span>
         </div>
         <h3 className="text-lg sm:text-xl font-serif text-[#5E3A36] mb-3 pr-8">
           {nombreProducto}
@@ -399,7 +419,7 @@ export default function ProbadorAR({
         <div className="relative h-80 sm:h-96 rounded-2xl overflow-hidden bg-[#F7E6E1] gold-ring-border flex items-center justify-center">
           <video ref={videoRef} playsInline muted className="hidden" />
 
-          {errorCamara && !fotoPropia ? (
+          {errorCamara && !fotoSubida ? (
             <div className="p-6 text-center space-y-3">
               <Camera className="w-8 h-8 text-[#C6736A] mx-auto" />
               <p className="text-xs text-[#5E3A36]">{errorCamara}</p>
@@ -423,19 +443,14 @@ export default function ProbadorAR({
 
           {!errorCamara && !fotoCapturada && (
             <>
-              <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-white/85 text-[10px] font-semibold text-[#5E3A36]">
-                {estadoIA === "activa"
-                  ? "IA Facial/Corporal Activa ✓"
-                  : estadoIA === "calibrando"
-                  ? "Espejo en vivo · Ajustando IA..."
-                  : "Modo Espejo Directo"}
+              <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-white/90 text-[10px] font-semibold text-[#5E3A36]">
+                {iaLista ? "IA Rastreo Activo ✓" : "Iniciando rastreo..."}
               </span>
 
-              {!fotoPropia && (
+              {!fotoSubida && (
                 <button
                   type="button"
                   onClick={() => setCamaraFrontal((prev) => !prev)}
-                  title="Voltear cámara"
                   className="absolute top-3 right-3 px-3 py-1.5 rounded-full bg-white/90 gold-ring-border text-[#5E3A36] text-[11px] font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
                 >
                   <SwitchCamera className="w-3.5 h-3.5 text-[#C6736A]" />
@@ -551,7 +566,7 @@ export default function ProbadorAR({
               className="py-2.5 px-3 rounded-full bg-white gold-ring-border text-xs font-semibold text-[#5E3A36] flex items-center justify-center gap-1.5 hover:bg-[#FDF8F6] cursor-pointer"
             >
               <Upload className="w-3.5 h-3.5 text-[#C89B54]" />
-              <span>{fotoPropia ? "Cambiar foto" : "Probar en foto"}</span>
+              <span>{fotoSubida ? "Cambiar foto" : "Probar en foto"}</span>
             </button>
 
             {fotoCapturada ? (
@@ -566,7 +581,7 @@ export default function ProbadorAR({
             ) : (
               <button
                 type="button"
-                onClick={tomarFoto}
+                onClick={capturarFoto}
                 className="py-2.5 px-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
               >
                 <Camera className="w-3.5 h-3.5" />
