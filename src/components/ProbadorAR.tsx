@@ -7,7 +7,7 @@ import {
   Sparkles,
   Download,
   SwitchCamera,
-  Loader2,
+  Upload,
 } from "lucide-react";
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
@@ -55,11 +55,13 @@ export default function ProbadorAR({
 }: ProbadorProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const inputSelfieRef = useRef<HTMLInputElement | null>(null);
 
   const [camaraFrontal, setCamaraFrontal] = useState<boolean>(true);
   const [rostroDetectado, setRostroDetectado] = useState<boolean>(false);
-  const [cargandoFiltro, setCargandoFiltro] = useState<boolean>(true);
+  const [iaActiva, setIaActiva] = useState<boolean>(false);
   const [errorCamara, setErrorCamara] = useState<string | null>(null);
+  const [selfieSubida, setSelfieSubida] = useState<HTMLImageElement | null>(null);
   const [fotoCapturada, setFotoCapturada] = useState<string | null>(null);
 
   const [labialActivo, setLabialActivo] = useState<TonoCosmetico>(
@@ -69,7 +71,6 @@ export default function ProbadorAR({
     TONOS_RUBOR.at(1) ?? { nombre: "Durazno Sol", color: "#E88368", opacidad: 0.36 }
   );
 
-  // Guardar referencias vivas de los colores para cambiarlos sin reiniciar la cámara
   const labialRef = useRef<TonoCosmetico>(labialActivo);
   const ruborRef = useRef<TonoCosmetico>(ruborActivo);
 
@@ -88,46 +89,57 @@ export default function ProbadorAR({
     let faceLandmarker: FaceLandmarker | null = null;
     let cancelado = false;
 
-    const iniciarEstudioMaquillaje = async () => {
+    const iniciarCamaraIndependiente = async () => {
       setErrorCamara(null);
-      setCargandoFiltro(true);
+      setIaActiva(false);
 
+      // 1. Encender la cámara de forma aislada
+      if (!selfieSubida) {
+        try {
+          if (!navigator.mediaDevices?.getUserMedia) {
+            setErrorCamara("Tu navegador actual no soporta cámara en vivo. Ábrelo en Chrome/Safari o sube una selfie.");
+            return;
+          }
+
+          streamActivo = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: camaraFrontal ? "user" : "environment" },
+            audio: false,
+          });
+
+          if (cancelado) return;
+
+          if (videoRef.current) {
+            videoRef.current.srcObject = streamActivo;
+            videoRef.current.setAttribute("playsinline", "true");
+            await videoRef.current.play();
+          }
+        } catch (err) {
+          if (!cancelado) {
+            const detalle = err instanceof Error ? err.name : "";
+            setErrorCamara(
+              `No se pudo iniciar la cámara (${detalle || "Permiso o HTTPS"}). Si abriste el enlace desde Instagram/WhatsApp, ábrelo en Chrome/Safari o sube una selfie.`
+            );
+          }
+          return;
+        }
+      }
+
+      // 2. Arrancar el dibujo en pantalla de inmediato
+      renderizarFiltroFacial();
+
+      // 3. Cargar MediaPipe en segundo plano (si falla, no apaga la cámara)
       try {
-        // 1. Cargar motor local desde /mediapipe (sin bloqueos de red)
         const vision = await FilesetResolver.forVisionTasks("/mediapipe/wasm");
         faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: "/mediapipe/face_landmarker.task",
           },
-          runningMode: "VIDEO",
+          runningMode: selfieSubida ? "IMAGE" : "VIDEO",
           numFaces: 1,
         });
-
-        // 2. Encender cámara
-        streamActivo = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: camaraFrontal ? "user" : "environment",
-          },
-          audio: false,
-        });
-
-        if (cancelado) return;
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = streamActivo;
-          videoRef.current.setAttribute("playsinline", "true");
-          await videoRef.current.play();
-        }
-
-        setCargandoFiltro(false);
-        renderizarFiltroFacial();
+        if (!cancelado) setIaActiva(true);
       } catch {
-        if (!cancelado) {
-          setCargandoFiltro(false);
-          setErrorCamara(
-            "No pudimos abrir la cámara. Asegúrate de dar permiso de cámara en Chrome o Safari."
-          );
-        }
+        // Mantiene la cámara activa aunque el modelo facial tarde
       }
     };
 
@@ -135,24 +147,29 @@ export default function ProbadorAR({
       if (cancelado) return;
       const video = videoRef.current;
       const canvas = canvasRef.current;
+      const listo = selfieSubida || (video && video.readyState >= 2 && video.videoWidth > 0);
 
-      if (video && canvas && video.readyState >= 2 && video.videoWidth > 0) {
+      if (canvas && listo) {
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          const w = video.videoWidth;
-          const h = video.videoHeight;
+          const w = selfieSubida ? selfieSubida.naturalWidth : video!.videoWidth;
+          const h = selfieSubida ? selfieSubida.naturalHeight : video!.videoHeight;
           canvas.width = w;
           canvas.height = h;
 
           ctx.save();
-          if (camaraFrontal) {
+          if (camaraFrontal && !selfieSubida) {
             ctx.translate(w, 0);
             ctx.scale(-1, 1);
           }
-          ctx.drawImage(video, 0, 0, w, h);
+
+          if (selfieSubida) ctx.drawImage(selfieSubida, 0, 0, w, h);
+          else if (video) ctx.drawImage(video, 0, 0, w, h);
 
           if (faceLandmarker) {
-            const resultados = faceLandmarker.detectForVideo(video, performance.now());
+            const resultados = selfieSubida
+              ? faceLandmarker.detect(selfieSubida)
+              : faceLandmarker.detectForVideo(video!, performance.now());
             const rostro = resultados.faceLandmarks.at(0);
 
             if (rostro) {
@@ -160,7 +177,6 @@ export default function ProbadorAR({
               const rubor = ruborRef.current;
               const labial = labialRef.current;
 
-              // Aplicar Rubor suave tipo aerógrafo en pómulos
               if (rubor.opacidad > 0) {
                 const mIzq = rostro.at(205);
                 const mDer = rostro.at(425);
@@ -179,7 +195,6 @@ export default function ProbadorAR({
                 }
               }
 
-              // Aplicar Labial siguiendo los 40 puntos exactos de los labios
               if (labial.opacidad > 0) {
                 ctx.save();
                 ctx.globalCompositeOperation = "multiply";
@@ -216,10 +231,12 @@ export default function ProbadorAR({
         }
       }
 
-      animationFrameId = requestAnimationFrame(renderizarFiltroFacial);
+      if (!selfieSubida) {
+        animationFrameId = requestAnimationFrame(renderizarFiltroFacial);
+      }
     };
 
-    iniciarEstudioMaquillaje();
+    iniciarCamaraIndependiente();
 
     return () => {
       cancelado = true;
@@ -229,15 +246,28 @@ export default function ProbadorAR({
       }
       faceLandmarker?.close();
     };
-  }, [abierto, camaraFrontal, fotoCapturada]);
+  }, [abierto, camaraFrontal, selfieSubida, fotoCapturada, labialActivo, ruborActivo]);
 
   if (!abierto) return null;
+  const manejarSelfieSubida = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const archivo = e.target.files?.item(0);
+    if (archivo) {
+      const img = new Image();
+      img.src = URL.createObjectURL(archivo);
+      img.onload = () => {
+        setSelfieSubida(img);
+        setErrorCamara(null);
+      };
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[#5E3A36]/30 backdrop-blur-xs overflow-y-auto">
       <div className="bg-[#FDF8F6] rounded-3xl max-w-lg w-full p-5 sm:p-6 gold-ring-border shadow-2xl relative my-4">
         <button
           onClick={() => {
             setFotoCapturada(null);
+            setSelfieSubida(null);
             alCerrar();
           }}
           className="absolute top-4 right-4 p-2 rounded-full bg-white gold-ring-border text-[#9E7B74] hover:text-[#C6736A] cursor-pointer z-20"
@@ -253,6 +283,14 @@ export default function ProbadorAR({
           {nombreProducto}
         </h3>
 
+        <input
+          ref={inputSelfieRef}
+          type="file"
+          accept="image/*"
+          onChange={manejarSelfieSubida}
+          className="hidden"
+        />
+
         <div className="relative h-80 sm:h-96 rounded-2xl overflow-hidden bg-[#F7E6E1] gold-ring-border flex items-center justify-center">
           <video
             ref={videoRef}
@@ -262,17 +300,17 @@ export default function ProbadorAR({
             className="absolute w-1 h-1 opacity-0 pointer-events-none"
           />
 
-          {cargandoFiltro && !errorCamara && (
-            <div className="absolute inset-0 z-10 bg-[#FDF8F6]/90 flex flex-col items-center justify-center gap-2 text-xs text-[#5E3A36]">
-              <Loader2 className="w-7 h-7 text-[#C6736A] animate-spin" />
-              <span>Encendiendo espejo de belleza...</span>
-            </div>
-          )}
-
-          {errorCamara ? (
-            <div className="p-6 text-center space-y-2">
+          {errorCamara && !selfieSubida ? (
+            <div className="p-6 text-center space-y-3">
               <Camera className="w-8 h-8 text-[#C6736A] mx-auto" />
-              <p className="text-xs text-[#5E3A36]">{errorCamara}</p>
+              <p className="text-xs text-[#5E3A36] leading-relaxed">{errorCamara}</p>
+              <button
+                type="button"
+                onClick={() => inputSelfieRef.current?.click()}
+                className="px-4 py-2 rounded-full bg-[#C6736A] text-white text-xs font-semibold cursor-pointer"
+              >
+                Subir mi selfie para probar tonos
+              </button>
             </div>
           ) : fotoCapturada ? (
             <img
@@ -284,22 +322,26 @@ export default function ProbadorAR({
             <canvas ref={canvasRef} className="w-full h-full object-cover" />
           )}
 
-          {!errorCamara && !fotoCapturada && !cargandoFiltro && (
+          {!errorCamara && !fotoCapturada && (
             <>
               <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-white/90 text-[10px] font-semibold text-[#5E3A36]">
-                {rostroDetectado
-                  ? "Rostro detectado · Filtro activo ✓"
-                  : "Ubica tu rostro frente a la cámara"}
+                {iaActiva
+                  ? rostroDetectado
+                    ? "Filtro Facial Activo ✓"
+                    : "Ubica tu rostro frente a la cámara"
+                  : "Espejo Activo"}
               </span>
 
-              <button
-                type="button"
-                onClick={() => setCamaraFrontal((prev) => !prev)}
-                className="absolute top-3 right-3 px-3 py-1.5 rounded-full bg-white/90 gold-ring-border text-[#5E3A36] text-[11px] font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <SwitchCamera className="w-3.5 h-3.5 text-[#C6736A]" />
-                <span>{camaraFrontal ? "Frontal" : "Trasera"}</span>
-              </button>
+              {!selfieSubida && (
+                <button
+                  type="button"
+                  onClick={() => setCamaraFrontal((prev) => !prev)}
+                  className="absolute top-3 right-3 px-3 py-1.5 rounded-full bg-white/90 gold-ring-border text-[#5E3A36] text-[11px] font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <SwitchCamera className="w-3.5 h-3.5 text-[#C6736A]" />
+                  <span>{camaraFrontal ? "Frontal" : "Trasera"}</span>
+                </button>
+              )}
             </>
           )}
         </div>
@@ -361,26 +403,28 @@ export default function ProbadorAR({
               ))}
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setFotoCapturada(null);
+                inputSelfieRef.current?.click();
+              }}
+              className="py-2.5 px-3 rounded-full bg-white gold-ring-border text-xs font-semibold text-[#5E3A36] flex items-center justify-center gap-1.5 hover:bg-[#FDF8F6] cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-[#C89B54]" />
+              <span>{selfieSubida ? "Cambiar selfie" : "Probar en selfie"}</span>
+            </button>
 
-          <div className="pt-1">
             {fotoCapturada ? (
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setFotoCapturada(null)}
-                  className="py-2.5 px-3 rounded-full bg-white gold-ring-border text-xs font-semibold text-[#5E3A36] cursor-pointer"
-                >
-                  Volver al Espejo
-                </button>
-                <a
-                  href={fotoCapturada}
-                  download={`Jadara-Makeup-${nombreProducto}.png`}
-                  className="py-2.5 px-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Guardar Selfie</span>
-                </a>
-              </div>
+              <a
+                href={fotoCapturada}
+                download={`Jadara-Makeup-${nombreProducto}.png`}
+                className="py-2.5 px-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Guardar Selfie</span>
+              </a>
             ) : (
               <button
                 type="button"
@@ -389,10 +433,10 @@ export default function ProbadorAR({
                     setFotoCapturada(canvasRef.current.toDataURL("image/png"));
                   }
                 }}
-                className="w-full py-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+                className="py-2.5 px-3 rounded-full bg-gradient-to-r from-[#C6736A] to-[#C89B54] text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
               >
                 <Camera className="w-4 h-4" />
-                <span>Tomar Selfie con Filtro</span>
+                <span>Tomar Selfie</span>
               </button>
             )}
           </div>
